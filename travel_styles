@@ -1,0 +1,72 @@
+
+table: travel_styles
+
+style_category
+* style_name
+
+Populate from below, and create a table called travel_styles with user_id and style_id
+
+Luxury
+* Spa and Wellness Retreats
+* Gourmet Picnics
+Cultural Immersion
+* Cultural Exchanges
+* Cultural Conservation
+* Artisan Workshops
+* Local Art Scenes
+* Street Food Experiences
+* Cooking Classes
+* Shopping
+* Historic Landmarks
+* Local Handicraft Experiences
+* Sacred Sites
+* Pilgrimage Routes
+* Harvest Festivals
+* Christmas Markets & Traditions
+* Easter Traditions
+* Midsummer Festivities
+Adventure and Nature
+* Hiking
+* Off-Roading
+* Nature Walks
+* Boating
+* Beach
+* Environmental Conservation
+* Farming Experiences
+* Fishing Experiences
+* Scuba Diving
+* Horseback Riding Excursions
+Wine and Culinary Experiences
+* Wine Experiences
+* Distillery Tours
+* Brewery Tours
+* Cheese Tasting Workshops
+* Truffle Hunting
+* Coffee Workshops
+* Gourmet Culinary Experiences
+* Local Card Game Evenings
+Arts and Culture
+* Photography
+* Theater
+* Live Music
+Wellness and Mindfulness
+* Yoga and Meditation
+* Hot Springs and Thermal Baths
+* Health and Nutrition Workshops
+* Fitness Bootcamps
+* Spa and Wellness Retreats
+Volunteering and Community
+* Environmental Volunteering
+* Community Outreach Programs
+* Restoration and Preservation Workshops
+* Language Workshops
+* Volunteer Opportunities
+* Storytime Volunteering
+* Community Planting Projects
+Ancient History and Mysteries
+* Archeology
+* Ancient Mysteries
+Transportation and Lifestyle
+* Vintage Car Driving
+* High performance Sports Car Driving
+* Car Rallies
