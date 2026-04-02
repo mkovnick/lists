@@ -2,16 +2,24 @@
 # Setup AutoScout24 scraper on macOS
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+echo "Creating virtual environment..."
+python3 -m venv "$VENV_DIR"
+
 echo "Installing Python dependencies..."
-pip3 install -r "$(dirname "$0")/requirements.txt"
+"$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
 
 echo "Installing Chromium browser for Playwright..."
-python3 -m playwright install chromium
+"$VENV_DIR/bin/python" -m playwright install chromium
 
 echo ""
-echo "Setup complete!"
+echo "✅ Setup complete!"
 echo ""
 echo "To start the app:"
-echo "  python3 autoscout24/app.py --host 0.0.0.0"
+echo "  $VENV_DIR/bin/python $SCRIPT_DIR/app.py --host 0.0.0.0"
 echo ""
-echo "Then open the URL shown in terminal — works on Mac and iPhone (same Wi-Fi)."
+echo "Or activate the venv first:"
+echo "  source $VENV_DIR/bin/activate"
+echo "  python autoscout24/app.py --host 0.0.0.0"
