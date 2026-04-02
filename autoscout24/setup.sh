@@ -1,14 +1,17 @@
 #!/bin/bash
-# Setup script for AutoScout24 scraper
+# Setup AutoScout24 scraper on macOS
 set -e
 
 echo "Installing Python dependencies..."
-pip install -r "$(dirname "$0")/requirements.txt"
+pip3 install -r "$(dirname "$0")/requirements.txt"
 
-echo "Installing Playwright Chromium browser..."
-python -m playwright install chromium
+echo "Installing Chromium browser for Playwright..."
+python3 -m playwright install chromium
 
 echo ""
-echo "Setup complete! Usage:"
-echo "  python autoscout24/scraper.py <autoscout24-url>"
-echo "  python autoscout24/compare.py"
+echo "Setup complete!"
+echo ""
+echo "To start the app:"
+echo "  python3 autoscout24/app.py --host 0.0.0.0"
+echo ""
+echo "Then open the URL shown in terminal — works on Mac and iPhone (same Wi-Fi)."

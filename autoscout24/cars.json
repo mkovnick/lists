@@ -1,18 +1,1 @@
-[
-  {
-    "make": "Mercedes-Benz",
-    "model": "CLA 250",
-    "version": "CLA 250 mit EQ Technologie AMG Line Navi Styling",
-    "price": 59290,
-    "currency": "EUR",
-    "mileage_km": 14900,
-    "first_registration": "02/2026",
-    "body_color": "Electric White",
-    "url": "https://www.autoscout24.com/offers/mercedes-benz-cla-250-cla-250-mit-eq-technologie-amg-line-navi-styling-electric-white-4e5053cc-175c-4ac4-afed-1aa1f03da1bc",
-    "listing_id": "mercedes-benz-cla-250-cla-250-mit-eq-technologie-amg-line-navi-styling-electric-white-4e5053cc-175c-4ac4-afed-1aa1f03da1bc",
-    "scraped_at": "2026-04-02T00:00:00",
-    "features": [],
-    "_source": "manual_entry",
-    "_note": "Manually entered from user data. Re-scrape with: python scraper.py <url> to get full features."
-  }
-]
+[]
