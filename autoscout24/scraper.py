@@ -23,7 +23,7 @@ DATA_FILE = Path(__file__).parent / "cars.json"
 
 
 def _launch_browser():
-    """Launch a Playwright Chromium browser with stealth-ish settings."""
+    """Launch a Playwright Chromium browser forcing English locale."""
     from playwright.sync_api import sync_playwright
     pw = sync_playwright().start()
     browser = pw.chromium.launch(headless=True)
@@ -33,8 +33,11 @@ def _launch_browser():
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/122.0.0.0 Safari/537.36"
         ),
-        locale="en-US",
+        locale="en-GB",
         viewport={"width": 1920, "height": 1080},
+        extra_http_headers={
+            "Accept-Language": "en-GB,en;q=0.9",
+        },
     )
     return pw, browser, context
 
@@ -357,19 +360,45 @@ def _parse_html(soup) -> dict:
 
     CATEGORY_KEYWORDS = {
         "comfort", "convenience", "entertainment", "media", "safety", "security",
-        "extra", "equipment", "feature", "ausstattung", "komfort", "sicherheit",
-        "unterhaltung", "multimedia", "infotainment",
+        "extra", "extras", "equipment", "feature", "features",
+        "comfort & convenience", "entertainment & media", "safety & security",
+        "ausstattung", "komfort", "sicherheit", "unterhaltung", "multimedia",
+        "infotainment", "overige", "exterieur", "interieur", "veiligheid",
+        "vehicle description", "general information", "technical information",
     }
+
+    # Regex patterns that indicate a value is a spec/measurement, NOT a feature
+    SPEC_PATTERNS = re.compile(
+        r"^[\d.,\s]+$"                    # pure numbers: "12", "3,319"
+        r"|^\d{1,2}/\d{4}$"              # dates: "10/2025", "02/2026"
+        r"|^\d+[\s.,]*\d*\s*(km|kg|kw|hp|ps|cc|mm|cm|l|nm|kwh|kw/h|g/km|s|€)\b"  # measurements
+        r"|^\d+\s*(kW|HP|PS|Nm|km/h|km/u)\b"
+        r"|^€"                            # prices
+        r"|^\d+\.\d+\s*s$"               # acceleration: "6.2 s"
+        r"|^\d+\s*cm$"                   # dimensions
+        r"|^\d+\s*liter$"               # tank size
+        r"|^[\d.,]+\s*%$"               # percentages
+        r"|^\w{2,3}\s*\d+$"             # codes: "EU6", "A1"
+        , re.IGNORECASE
+    )
 
     # Helper: is text a plausible feature name?
     def _is_feature(text):
-        if not text or len(text) > 200 or len(text) < 2:
+        if not text or len(text) > 150 or len(text) < 3:
             return False
-        # Skip category headers, prices, long descriptions
-        lower = text.lower()
-        if any(lower == kw for kw in CATEGORY_KEYWORDS):
+        lower = text.lower().strip()
+        # Skip section headers
+        if lower in CATEGORY_KEYWORDS:
             return False
-        if text.startswith("€") or text.startswith("$"):
+        # Skip specs and measurements
+        if SPEC_PATTERNS.match(text.strip()):
+            return False
+        # Skip things that are clearly not features
+        if text.startswith("€") or text.startswith("$") or text.startswith("http"):
+            return False
+        # Skip if it's mostly digits (like "001 km" or "005 kg")
+        digits = sum(1 for c in text if c.isdigit())
+        if len(text) > 0 and digits / len(text) > 0.5:
             return False
         return True
 
@@ -461,13 +490,12 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
     import time
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-    # Handle pagination: replace or append page= parameter
-    if page_num > 1:
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        params["page"] = [str(page_num)]
-        new_query = urlencode(params, doseq=True)
-        url = urlunparse(parsed._replace(query=new_query))
+    # Handle pagination: always set the page= parameter explicitly
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params["page"] = [str(page_num)]
+    new_query = urlencode(params, doseq=True)
+    url = urlunparse(parsed._replace(query=new_query))
 
     pw, browser, context = _launch_browser()
     try:

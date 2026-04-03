@@ -154,9 +154,9 @@ def _search_worker(params):
                 total_on_site = total
             all_listings.extend(listings)
             _log(f"  Got {len(listings)} listings (total on site: {total_on_site})")
-            # Stop if we got all results or this page was empty
-            if not listings or len(all_listings) >= total_on_site:
-                _log(f"  All {total_on_site} results fetched across {pg} page(s)")
+            # Stop only if page returned zero results (no more pages)
+            if not listings:
+                _log(f"  Empty page — no more results. Stopping.")
                 break
             if pg < max_pages:
                 time.sleep(2)
@@ -433,7 +433,8 @@ function renderCars(){
    <span class="price">${fmtP(c.price)}</span>
    <span class="meta"> · ${fmtKm(c.mileage_km)} · ${esc(str(c.body_color))} · ${esc(str(c.fuel_type))}</span>
    <span class="feat-count">${fc} features</span>
-   ${fc?`<details style="margin-top:6px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Show features</summary>
+   ${c.url?`<div style="margin-top:6px"><a href="${esc(c.url)}" target="_blank" rel="noopener" style="color:var(--blue);font-size:.8rem;text-decoration:none">View on AutoScout24 ↗</a></div>`:''}
+   ${fc?`<details style="margin-top:6px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Show ${fc} features</summary>
    <div style="margin-top:4px">${c.features.map(f=>'<span class="tag">'+esc(f)+'</span>').join('')}</div></details>`:''}
    <button class="remove-btn" onclick="delCar('${esc(c.listing_id)}')">Remove</button>
   </div>`;
@@ -489,7 +490,9 @@ function renderMatrix(){
  let h='<table class="matrix"><thead><tr><th>Feature</th>';
  labels.forEach((l,i)=>{
   const p=fmtP(cars[i].price);
-  h+=`<th>${esc(l)}<br><span style="font-weight:400;font-size:.7rem">${p}</span></th>`;
+  const url=cars[i].url;
+  const name=url?`<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${esc(l)}</a>`:esc(l);
+  h+=`<th>${name}<br><span style="font-weight:400;font-size:.7rem">${p}</span></th>`;
  });
  h+='</tr></thead><tbody>';
 
