@@ -326,12 +326,21 @@ def _parse_html(soup) -> dict:
 
 
 def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]:
-    """Scrape an AutoScout24 search results page. Returns (listings, total_count)."""
-    import time
+    """Scrape an AutoScout24 search results page. Returns (listings, total_count).
 
+    Accepts either a constructed URL or a raw URL pasted from AutoScout24.
+    Handles the page= parameter intelligently.
+    """
+    import time
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+    # Handle pagination: replace or append page= parameter
     if page_num > 1:
-        sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}page={page_num}"
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params["page"] = [str(page_num)]
+        new_query = urlencode(params, doseq=True)
+        url = urlunparse(parsed._replace(query=new_query))
 
     pw, browser, context = _launch_browser()
     try:

@@ -122,18 +122,23 @@ def _search_worker(params):
     try:
         from scraper import build_search_url, scrape_search_results, scrape_listing
 
-        search_url = build_search_url(
-            make=params.get("make", ""),
-            model=params.get("model", ""),
-            price_from=params.get("price_from"),
-            price_to=params.get("price_to"),
-            year_from=params.get("year_from"),
-            year_to=params.get("year_to"),
-            km_to=params.get("km_to"),
-            fuel=params.get("fuel", ""),
-            gear=params.get("gear", ""),
-            country=params.get("country", ""),
-        )
+        # Use raw URL if provided, otherwise build from filters
+        search_url = params.get("search_url", "").strip()
+        if search_url and "autoscout24" in search_url:
+            _log(f"Using your search URL directly")
+        else:
+            search_url = build_search_url(
+                make=params.get("make", ""),
+                model=params.get("model", ""),
+                price_from=params.get("price_from"),
+                price_to=params.get("price_to"),
+                year_from=params.get("year_from"),
+                year_to=params.get("year_to"),
+                km_to=params.get("km_to"),
+                fuel=params.get("fuel", ""),
+                gear=params.get("gear", ""),
+                country=params.get("country", ""),
+            )
         _log(f"Search URL: {search_url}")
 
         pages = min(int(params.get("pages", 2)), 10)
@@ -305,27 +310,14 @@ font-size:.72rem;margin:2px}
 
 <!-- ══ SEARCH ══ -->
 <div id="search" class="pane active">
-<div class="row">
- <div><label>Make</label><input id="s-make" value="mercedes-benz"></div>
- <div><label>Model</label><input id="s-model" value="c-class"></div>
+<label>Paste your AutoScout24 search URL</label>
+<input type="url" id="s-url" placeholder="https://www.autoscout24.com/lst/mercedes-benz/c-series-...">
+<p style="font-size:.72rem;color:var(--muted);margin-top:4px">Set up your filters on AutoScout24, then copy the URL from your browser and paste it here.</p>
+<div class="row" style="margin-top:8px">
+ <div><label>Pages to scan</label><input type="number" id="s-pages" value="3" min="1" max="10"></div>
+ <div><label>Max cars to scrape</label><input type="number" id="s-max" value="20" min="1" max="50"></div>
 </div>
-<div class="row">
- <div><label>Price from (€)</label><input type="number" id="s-pfrom"></div>
- <div><label>Price to (€)</label><input type="number" id="s-pto"></div>
-</div>
-<div class="row">
- <div><label>Year from</label><input type="number" id="s-yfrom"></div>
- <div><label>Max km</label><input type="number" id="s-kmto"></div>
-</div>
-<div class="row">
- <div><label>Exclude colors</label><input id="s-excol" value="black" placeholder="black, brown"></div>
- <div><label>Must have feature</label><input id="s-feat" value="360" placeholder="e.g. 360"></div>
-</div>
-<div class="row">
- <div><label>Pages to scan</label><input type="number" id="s-pages" value="2" min="1" max="10"></div>
- <div><label>Max cars to scrape</label><input type="number" id="s-max" value="15" min="1" max="50"></div>
-</div>
-<button class="btn btn-primary" id="search-btn" onclick="startSearch()">Search & Scrape All Features</button>
+<button class="btn btn-primary" id="search-btn" onclick="startSearch()">Scrape All Listings</button>
 
 <div id="search-progress" style="display:none">
  <div class="progress-bar"><div class="progress-fill" id="pbar"></div></div>
@@ -382,12 +374,11 @@ async function loadCars(){
 
 // Search
 async function startSearch(){
+ const url=v('s-url');
+ if(!url||!url.includes('autoscout24')){alert('Please paste an AutoScout24 search URL');return;}
  const p={
-  make:v('s-make'),model:v('s-model'),
-  price_from:n('s-pfrom'),price_to:n('s-pto'),
-  year_from:n('s-yfrom'),km_to:n('s-kmto'),
-  exclude_colors:v('s-excol'),require_features:v('s-feat'),
-  pages:n('s-pages')||2,max_scrape:n('s-max')||15
+  search_url:url,
+  pages:n('s-pages')||3,max_scrape:n('s-max')||20
  };
  document.getElementById('search-btn').disabled=true;
  document.getElementById('search-progress').style.display='block';
