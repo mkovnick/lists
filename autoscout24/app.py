@@ -304,7 +304,7 @@ font-size:.72rem;margin:2px}
 <div class="tab active" data-t="search">Search</div>
 <div class="tab" data-t="add">Add URL</div>
 <div class="tab" data-t="cars">Cars <span id="cnt"></span></div>
-<div class="tab" data-t="matrix">Features</div>
+<div class="tab" data-t="matrix">Export</div>
 </div>
 
 <!-- ══ SEARCH ══ -->
@@ -338,14 +338,12 @@ font-size:.72rem;margin:2px}
 <div id="car-list"></div>
 </div>
 
-<!-- ══ FEATURE MATRIX ══ -->
+<!-- ══ EXPORT FOR CLAUDE ══ -->
 <div id="matrix" class="pane">
-<div class="filter-row">
- <input id="feat-filter" placeholder="Filter features..." oninput="renderMatrix()">
- <button class="btn btn-secondary" onclick="document.getElementById('feat-filter').value='';renderMatrix()">Clear</button>
-</div>
+<p style="font-size:.85rem;color:var(--muted);margin-bottom:8px">Tap "Copy" then paste into your Claude project for analysis.</p>
+<button class="btn btn-primary" onclick="copyExport()" id="copy-btn">Copy to Clipboard</button>
 <div class="stats" id="matrix-stats"></div>
-<div class="matrix-wrap" id="matrix-out"></div>
+<pre class="log" id="matrix-out" style="max-height:none;white-space:pre;overflow-x:auto;font-size:.7rem;margin-top:10px"></pre>
 </div>
 
 </div>
@@ -447,99 +445,105 @@ async function delCar(lid){
  await loadCars();renderCars();
 }
 
-// ═══ FEATURE COMPARISON MATRIX ═══
+// ═══ EXPORT FOR CLAUDE ═══
+let exportText='';
+
 function renderMatrix(){
  const out=document.getElementById('matrix-out');
  const statsEl=document.getElementById('matrix-stats');
- const filter=(document.getElementById('feat-filter').value||'').toLowerCase();
 
- if(cars.length<1){out.innerHTML='<p class="empty">Add at least 1 car to see features.</p>';statsEl.innerHTML='';return;}
+ if(cars.length<1){out.textContent='No cars yet. Use Search or Add URL.';statsEl.innerHTML='';exportText='';return;}
 
  // Sort cars by most features first
- const sortedIdx=[...cars.keys()].sort((a,b)=>(cars[b].features||[]).length-(cars[a].features||[]).length);
- const sortedCars=sortedIdx.map(i=>cars[i]);
+ const sorted=[...cars].sort((a,b)=>(b.features||[]).length-(a.features||[]).length);
 
- // Collect all features per car (in sorted order)
- const carFeats=sortedCars.map(c=>new Set((c.features||[]).map(f=>f)));
+ // Collect all features
+ const carFeats=sorted.map(c=>new Set(c.features||[]));
  const allFeats=new Set();
  carFeats.forEach(s=>s.forEach(f=>allFeats.add(f)));
- let feats=[...allFeats].sort();
+ const feats=[...allFeats].sort();
 
- if(!feats.length){out.innerHTML='<p class="empty">No feature data. Scrape listings to get features.</p>';statsEl.innerHTML='';return;}
-
- // Apply text filter
- if(filter)feats=feats.filter(f=>f.toLowerCase().includes(filter));
-
- // Classify: common (all have), partial (some have)
- const common=feats.filter(f=>carFeats.every(s=>s.has(f)));
- const partial=feats.filter(f=>!carFeats.every(s=>s.has(f)));
-
- // Car labels — full model name including version/trim
- const labels=sortedCars.map(c=>{
-  return [c.make,c.model,c.version].filter(Boolean).join(' ')||c.title||'?';
- });
+ if(!feats.length){out.textContent='No feature data. Scrape listings first.';statsEl.innerHTML='';exportText='';return;}
 
  // Stats
- const totalAllFeats=[...allFeats].length;
  statsEl.innerHTML=`
-  <div class="stat"><div class="val">${sortedCars.length}</div><div class="lbl">Cars</div></div>
-  <div class="stat"><div class="val">${totalAllFeats}</div><div class="lbl">Total features</div></div>
-  <div class="stat"><div class="val">${common.length}</div><div class="lbl">All cars have</div></div>
-  <div class="stat"><div class="val" style="color:var(--red)">${partial.length}</div><div class="lbl">Differences</div></div>
+  <div class="stat"><div class="val">${sorted.length}</div><div class="lbl">Cars</div></div>
+  <div class="stat"><div class="val">${feats.length}</div><div class="lbl">Features</div></div>
  `;
 
- // Build table
- let h='<table class="matrix"><thead><tr><th>Feature</th>';
- labels.forEach((l,i)=>{
-  const p=fmtP(sortedCars[i].price);
-  const url=sortedCars[i].url;
-  const name=url?`<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${esc(l)}</a>`:esc(l);
-  h+=`<th>${name}<br><span style="font-weight:400;font-size:.7rem">${p}</span></th>`;
+ // Build tab-separated export
+ // Header: car summaries
+ let lines=[];
+ lines.push('=== AUTOSCOUT24 SEARCH RESULTS ===');
+ lines.push('');
+ lines.push(`${sorted.length} cars scraped, ${feats.length} unique features found`);
+ lines.push('');
+
+ // Per-car summary block
+ lines.push('=== CAR DETAILS ===');
+ sorted.forEach((c,i)=>{
+  const label=[c.make,c.model,c.version].filter(Boolean).join(' ')||c.title||'?';
+  lines.push('');
+  lines.push(`--- Car ${i+1}: ${label} ---`);
+  if(c.url) lines.push(`URL: ${c.url}`);
+  if(c.price) lines.push(`Price: €${typeof c.price==='number'?c.price.toLocaleString('de-DE'):c.price}`);
+  if(c.mileage_km) lines.push(`Mileage: ${typeof c.mileage_km==='number'?c.mileage_km.toLocaleString('de-DE'):c.mileage_km} km`);
+  if(c.first_registration) lines.push(`First registration: ${str(c.first_registration)}`);
+  if(c.fuel_type) lines.push(`Fuel: ${str(c.fuel_type)}`);
+  if(c.power_hp) lines.push(`Power: ${str(c.power_hp)} HP`);
+  if(c.power_kw) lines.push(`Power: ${str(c.power_kw)} kW`);
+  if(c.transmission) lines.push(`Transmission: ${str(c.transmission)}`);
+  if(c.body_color) lines.push(`Color: ${str(c.body_color)}`);
+  if(c.body_type) lines.push(`Body: ${str(c.body_type)}`);
+  if(c.seller_name) lines.push(`Seller: ${str(c.seller_name)}, ${str(c.seller_city)} ${str(c.seller_country)}`);
+  const fc=(c.features||[]).length;
+  lines.push(`Features: ${fc}`);
  });
- h+='</tr></thead><tbody>';
 
- // Missing features count per car
- const missingCounts=sortedCars.map((_,i)=>partial.filter(f=>!carFeats[i].has(f)).length);
+ // Feature comparison table (tab-separated)
+ lines.push('');
+ lines.push('=== FEATURE COMPARISON TABLE ===');
+ lines.push('(✓ = has feature, ✗ = missing)');
+ lines.push('');
 
- // Summary row
- h+='<tr class="count-row"><th style="color:var(--red)">Missing features</th>';
- missingCounts.forEach(n=>h+=`<td style="text-align:center;color:var(--red);font-size:.9rem">${n}</td>`);
- h+='</tr>';
+ // Column headers (short labels)
+ const shortLabels=sorted.map((c,i)=>{
+  let l=[c.make,c.model].filter(Boolean).join(' ')||'Car '+(i+1);
+  return `Car${i+1}: ${l}`;
+ });
+ lines.push('Feature\t'+shortLabels.join('\t'));
 
- h+='<tr class="count-row"><th style="color:var(--green)">Total features</th>';
- carFeats.forEach(s=>h+=`<td style="text-align:center;color:var(--green)">${s.size}</td>`);
- h+='</tr>';
-
- // Differing features first (most interesting)
- if(partial.length){
-  h+=`<tr class="category-row"><th colspan="${sortedCars.length+1}">⚡ Differences — features NOT all cars have (${partial.length})</th></tr>`;
-  // Sort: features that fewer cars have first (rarest first)
-  partial.sort((a,b)=>{
-   const ca=carFeats.filter(s=>s.has(a)).length;
-   const cb=carFeats.filter(s=>s.has(b)).length;
-   return ca-cb||a.localeCompare(b);
-  });
-  for(const f of partial){
-   h+=`<tr><th>${esc(f)}</th>`;
-   carFeats.forEach(s=>{
-    h+=s.has(f)?'<td class="has">✓</td>':'<td class="miss">✗</td>';
-   });
-   h+='</tr>';
-  }
+ // Feature rows
+ for(const f of feats){
+  const row=[f];
+  carFeats.forEach(s=>row.push(s.has(f)?'✓':'✗'));
+  lines.push(row.join('\t'));
  }
 
- // Common features
- if(common.length){
-  h+=`<tr class="category-row"><th colspan="${sortedCars.length+1}">✓ Common — all cars have (${common.length})</th></tr>`;
-  for(const f of common){
-   h+=`<tr><th>${esc(f)}</th>`;
-   carFeats.forEach(()=>h+='<td class="has">✓</td>');
-   h+='</tr>';
-  }
- }
+ exportText=lines.join('\n');
+ out.textContent=exportText;
+}
 
- h+='</tbody></table>';
- out.innerHTML=h;
+function copyExport(){
+ if(!exportText){alert('Nothing to copy. Scrape some cars first.');return;}
+ navigator.clipboard.writeText(exportText).then(()=>{
+  const btn=document.getElementById('copy-btn');
+  btn.textContent='Copied!';
+  btn.style.background='var(--green)';
+  setTimeout(()=>{btn.textContent='Copy to Clipboard';btn.style.background='';},2000);
+ }).catch(()=>{
+  // Fallback for non-HTTPS
+  const ta=document.createElement('textarea');
+  ta.value=exportText;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  const btn=document.getElementById('copy-btn');
+  btn.textContent='Copied!';
+  btn.style.background='var(--green)';
+  setTimeout(()=>{btn.textContent='Copy to Clipboard';btn.style.background='';},2000);
+ });
 }
 
 // Helpers
