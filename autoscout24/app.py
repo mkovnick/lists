@@ -273,7 +273,7 @@ max-height:200px;overflow-y:auto;color:var(--muted);margin-top:8px;white-space:p
 .matrix th,.matrix td{padding:5px 8px;border:1px solid var(--border);white-space:nowrap}
 .matrix th{position:sticky;left:0;background:var(--card);z-index:2;text-align:left;max-width:180px;
 overflow:hidden;text-overflow:ellipsis;font-weight:500}
-.matrix thead th{position:sticky;top:0;background:var(--bg);z-index:3;text-align:center;font-weight:600}
+.matrix thead th{position:sticky;top:0;background:var(--bg);z-index:3;text-align:center;font-weight:600;white-space:normal;min-width:120px;max-width:200px}
 .matrix thead th:first-child{z-index:4}
 .matrix .has{background:#1a3a1a;color:var(--green);text-align:center}
 .matrix .miss{background:#3a1a1a;color:var(--red);text-align:center}
@@ -455,8 +455,12 @@ function renderMatrix(){
 
  if(cars.length<1){out.innerHTML='<p class="empty">Add at least 1 car to see features.</p>';statsEl.innerHTML='';return;}
 
- // Collect all features per car
- const carFeats=cars.map(c=>new Set((c.features||[]).map(f=>f)));
+ // Sort cars by most features first
+ const sortedIdx=[...cars.keys()].sort((a,b)=>(cars[b].features||[]).length-(cars[a].features||[]).length);
+ const sortedCars=sortedIdx.map(i=>cars[i]);
+
+ // Collect all features per car (in sorted order)
+ const carFeats=sortedCars.map(c=>new Set((c.features||[]).map(f=>f)));
  const allFeats=new Set();
  carFeats.forEach(s=>s.forEach(f=>allFeats.add(f)));
  let feats=[...allFeats].sort();
@@ -470,17 +474,15 @@ function renderMatrix(){
  const common=feats.filter(f=>carFeats.every(s=>s.has(f)));
  const partial=feats.filter(f=>!carFeats.every(s=>s.has(f)));
 
- // Car labels
- const labels=cars.map(c=>{
-  let l=[c.make,c.model].filter(Boolean).join(' ')||c.title||'?';
-  if(l.length>18)l=l.slice(0,16)+'…';
-  return l;
+ // Car labels — full model name including version/trim
+ const labels=sortedCars.map(c=>{
+  return [c.make,c.model,c.version].filter(Boolean).join(' ')||c.title||'?';
  });
 
  // Stats
  const totalAllFeats=[...allFeats].length;
  statsEl.innerHTML=`
-  <div class="stat"><div class="val">${cars.length}</div><div class="lbl">Cars</div></div>
+  <div class="stat"><div class="val">${sortedCars.length}</div><div class="lbl">Cars</div></div>
   <div class="stat"><div class="val">${totalAllFeats}</div><div class="lbl">Total features</div></div>
   <div class="stat"><div class="val">${common.length}</div><div class="lbl">All cars have</div></div>
   <div class="stat"><div class="val" style="color:var(--red)">${partial.length}</div><div class="lbl">Differences</div></div>
@@ -489,15 +491,15 @@ function renderMatrix(){
  // Build table
  let h='<table class="matrix"><thead><tr><th>Feature</th>';
  labels.forEach((l,i)=>{
-  const p=fmtP(cars[i].price);
-  const url=cars[i].url;
+  const p=fmtP(sortedCars[i].price);
+  const url=sortedCars[i].url;
   const name=url?`<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${esc(l)}</a>`:esc(l);
   h+=`<th>${name}<br><span style="font-weight:400;font-size:.7rem">${p}</span></th>`;
  });
  h+='</tr></thead><tbody>';
 
  // Missing features count per car
- const missingCounts=cars.map((_,i)=>partial.filter(f=>!carFeats[i].has(f)).length);
+ const missingCounts=sortedCars.map((_,i)=>partial.filter(f=>!carFeats[i].has(f)).length);
 
  // Summary row
  h+='<tr class="count-row"><th style="color:var(--red)">Missing features</th>';
@@ -510,7 +512,7 @@ function renderMatrix(){
 
  // Differing features first (most interesting)
  if(partial.length){
-  h+=`<tr class="category-row"><th colspan="${cars.length+1}">⚡ Differences — features NOT all cars have (${partial.length})</th></tr>`;
+  h+=`<tr class="category-row"><th colspan="${sortedCars.length+1}">⚡ Differences — features NOT all cars have (${partial.length})</th></tr>`;
   // Sort: features that fewer cars have first (rarest first)
   partial.sort((a,b)=>{
    const ca=carFeats.filter(s=>s.has(a)).length;
@@ -528,7 +530,7 @@ function renderMatrix(){
 
  // Common features
  if(common.length){
-  h+=`<tr class="category-row"><th colspan="${cars.length+1}">✓ Common — all cars have (${common.length})</th></tr>`;
+  h+=`<tr class="category-row"><th colspan="${sortedCars.length+1}">✓ Common — all cars have (${common.length})</th></tr>`;
   for(const f of common){
    h+=`<tr><th>${esc(f)}</th>`;
    carFeats.forEach(()=>h+='<td class="has">✓</td>');

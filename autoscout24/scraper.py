@@ -310,6 +310,37 @@ def _parse_json_ld(item: dict) -> dict:
     return car
 
 
+def _parse_euro_price(text: str) -> int | None:
+    """Parse European price format: € 55.950 or € 55,950 or € 55.950,00"""
+    m = re.search(r"€?\s*([\d.,\s]+)", text)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    # European: dots are thousands separators, comma is decimal
+    if "." in raw and "," in raw:
+        # "55.950,00" — dots are thousands, comma is decimal
+        raw = raw.replace(".", "").replace(",", ".")
+    elif "." in raw:
+        parts = raw.split(".")
+        if len(parts[-1]) == 3 or len(parts) > 2:
+            # "55.950" or "1.234.567" — dots are thousands separators
+            raw = raw.replace(".", "")
+    elif "," in raw:
+        parts = raw.split(",")
+        if len(parts[-1]) == 3 or len(parts) > 2:
+            # "55,950" — commas are thousands separators
+            raw = raw.replace(",", "")
+        else:
+            # "55,95" — comma is decimal
+            raw = raw.replace(",", ".")
+    raw = raw.replace(" ", "")
+    try:
+        val = int(float(raw))
+        return val if 500 < val < 10_000_000 else None
+    except ValueError:
+        return None
+
+
 def _parse_html(soup) -> dict:
     """Scrape specs and features directly from HTML DOM.
 
@@ -337,23 +368,18 @@ def _parse_html(soup) -> dict:
 
     # Price from HTML
     for el in soup.find_all(attrs={"data-testid": re.compile(r"price", re.I)}):
-        text = el.get_text(strip=True)
-        nums = re.findall(r"[\d]+", text.replace(".", "").replace(",", "").replace(" ", ""))
-        if nums:
-            val = int(nums[0])
-            if val > 1000:  # sanity check
+        val = _parse_euro_price(el.get_text(strip=True))
+        if val:
+            car["price"] = val
+            car["currency"] = "EUR"
+            break
+    if "price" not in car:
+        for el in soup.find_all(string=re.compile(r"€\s*[\d.,]+")):
+            val = _parse_euro_price(str(el))
+            if val:
                 car["price"] = val
                 car["currency"] = "EUR"
                 break
-    if "price" not in car:
-        for el in soup.find_all(string=re.compile(r"€\s*[\d.,]+")):
-            nums = re.findall(r"[\d]+", str(el).replace(".", "").replace(",", "").replace(" ", ""))
-            if nums:
-                val = int(nums[0])
-                if val > 1000:
-                    car["price"] = val
-                    car["currency"] = "EUR"
-                    break
 
     # ── Feature extraction (multiple strategies) ──
     features = set()
@@ -562,9 +588,9 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
         if km_match:
             listing["mileage_km"] = int(km_match.group(1).replace(".", "").replace(",", ""))
 
-        price_match = re.search(r"€\s*([\d.,]+)", text)
-        if price_match:
-            listing["price"] = int(price_match.group(1).replace(".", "").replace(",", ""))
+        price_val = _parse_euro_price(text)
+        if price_val:
+            listing["price"] = price_val
             listing["currency"] = "EUR"
 
         for color in ("black", "white", "grey", "silver", "blue", "red", "green", "brown", "beige", "orange", "yellow", "gold", "violet"):
