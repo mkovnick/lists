@@ -149,6 +149,35 @@ def _parse_listing_page(html: str, url: str) -> dict:
     return car
 
 
+def _stringify(val) -> str:
+    """Safely convert a value to a string. Handles dicts/lists from JSON."""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        # Common patterns: {"formatted": "..."}, {"value": "..."}, {"label": "..."}
+        for key in ("formatted", "label", "value", "name", "text", "display"):
+            if key in val:
+                return str(val[key])
+        return ""
+    if isinstance(val, (int, float)):
+        return val  # keep numeric
+    return str(val)
+
+
+def _extract_feature_name(f) -> str:
+    """Extract a feature name from various formats."""
+    if isinstance(f, str):
+        return f.strip()
+    if isinstance(f, dict):
+        for key in ("label", "name", "text", "formatted", "value", "description"):
+            v = f.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
 def _parse_next_data(next_data: dict) -> dict:
     """Parse car details from Next.js __NEXT_DATA__ props."""
     car = {}
@@ -156,88 +185,101 @@ def _parse_next_data(next_data: dict) -> dict:
     listing = props.get("listingDetails", props.get("listing", {}))
 
     vehicle = listing.get("vehicle", {})
-    car["make"] = vehicle.get("make", "")
-    car["model"] = vehicle.get("model", "")
-    car["version"] = vehicle.get("rawVersion", vehicle.get("version", ""))
-    car["model_year"] = vehicle.get("modelYear", "")
-    car["body_type"] = vehicle.get("bodyType", "")
-    car["body_color"] = vehicle.get("bodyColor", "")
-    car["body_color_original"] = vehicle.get("bodyColorOriginal", "")
-    car["paint_type"] = vehicle.get("paintType", "")
-    car["num_doors"] = vehicle.get("numberOfDoors", "")
-    car["num_seats"] = vehicle.get("numberOfSeats", "")
-    car["mileage_km"] = vehicle.get("mileageInKm", vehicle.get("mileage", ""))
-    car["first_registration"] = vehicle.get("firstRegistrationDate", "")
-    car["fuel_type"] = vehicle.get("fuelType", vehicle.get("fuelCategory", ""))
-    car["transmission"] = vehicle.get("transmissionType", "")
-    car["drive_type"] = vehicle.get("driveType", "")
-    car["power_kw"] = vehicle.get("powerInKw", "")
-    car["power_hp"] = vehicle.get("powerInHp", vehicle.get("rawPowerInHp", ""))
-    car["displacement_cc"] = vehicle.get("cubicCapacity", vehicle.get("displacementInCcm", ""))
-    car["cylinders"] = vehicle.get("numberOfCylinders", "")
-    car["gears"] = vehicle.get("numberOfGears", "")
-    car["fuel_consumption_combined"] = vehicle.get("fuelConsumptionCombined", "")
-    car["co2_emissions"] = vehicle.get("co2Emission", vehicle.get("co2EmissionsCombined", ""))
-    car["emission_class"] = vehicle.get("emissionClass", "")
-    car["energy_efficiency_class"] = vehicle.get("energyEfficiencyClass", "")
-    car["condition"] = vehicle.get("condition", "")
-    car["num_previous_owners"] = vehicle.get("numberOfPreviousOwners", "")
+    car["make"] = _stringify(vehicle.get("make", ""))
+    car["model"] = _stringify(vehicle.get("model", ""))
+    car["version"] = _stringify(vehicle.get("rawVersion", vehicle.get("version", "")))
+    car["model_year"] = _stringify(vehicle.get("modelYear", ""))
+    car["body_type"] = _stringify(vehicle.get("bodyType", ""))
+    car["body_color"] = _stringify(vehicle.get("bodyColor", ""))
+    car["body_color_original"] = _stringify(vehicle.get("bodyColorOriginal", ""))
+    car["paint_type"] = _stringify(vehicle.get("paintType", ""))
+    car["num_doors"] = _stringify(vehicle.get("numberOfDoors", ""))
+    car["num_seats"] = _stringify(vehicle.get("numberOfSeats", ""))
+    car["mileage_km"] = _stringify(vehicle.get("mileageInKm", vehicle.get("mileage", "")))
+    car["first_registration"] = _stringify(vehicle.get("firstRegistrationDate", ""))
+    car["fuel_type"] = _stringify(vehicle.get("fuelType", vehicle.get("fuelCategory", "")))
+    car["transmission"] = _stringify(vehicle.get("transmissionType", ""))
+    car["drive_type"] = _stringify(vehicle.get("driveType", ""))
+    car["power_kw"] = _stringify(vehicle.get("powerInKw", ""))
+    car["power_hp"] = _stringify(vehicle.get("powerInHp", vehicle.get("rawPowerInHp", "")))
+    car["displacement_cc"] = _stringify(vehicle.get("cubicCapacity", vehicle.get("displacementInCcm", "")))
+    car["cylinders"] = _stringify(vehicle.get("numberOfCylinders", ""))
+    car["gears"] = _stringify(vehicle.get("numberOfGears", ""))
+    car["fuel_consumption_combined"] = _stringify(vehicle.get("fuelConsumptionCombined", ""))
+    car["co2_emissions"] = _stringify(vehicle.get("co2Emission", vehicle.get("co2EmissionsCombined", "")))
+    car["emission_class"] = _stringify(vehicle.get("emissionClass", ""))
+    car["energy_efficiency_class"] = _stringify(vehicle.get("energyEfficiencyClass", ""))
+    car["condition"] = _stringify(vehicle.get("condition", ""))
+    car["num_previous_owners"] = _stringify(vehicle.get("numberOfPreviousOwners", ""))
 
-    # Price
-    pricing = listing.get("prices", listing.get("price", {}))
+    # Price — try multiple locations
+    pricing = listing.get("prices", listing.get("price", listing.get("tracking", {}).get("price", {})))
     if isinstance(pricing, dict):
-        car["price"] = pricing.get("publicPrice", pricing.get("price", ""))
-        car["currency"] = pricing.get("currency", "EUR")
+        for price_key in ("publicPrice", "price", "amount", "value"):
+            p = pricing.get(price_key)
+            if isinstance(p, (int, float)) and p > 0:
+                car["price"] = p
+                break
+            elif isinstance(p, dict):
+                for sub_key in ("value", "amount", "raw"):
+                    sv = p.get(sub_key)
+                    if isinstance(sv, (int, float)) and sv > 0:
+                        car["price"] = sv
+                        break
+        car["currency"] = _stringify(pricing.get("currency", "EUR"))
     elif isinstance(pricing, (int, float)):
         car["price"] = pricing
         car["currency"] = "EUR"
 
-    # Features / equipment
+    # Features / equipment — try every possible location
     features = set()
 
-    # Flat list
-    for key in ("equipments", "features", "equipment"):
-        raw = vehicle.get(key, [])
-        if isinstance(raw, list):
-            for f in raw:
-                name = f if isinstance(f, str) else f.get("label", f.get("name", ""))
+    def _collect_features(obj):
+        """Recursively collect feature names from any structure."""
+        if isinstance(obj, str) and obj.strip():
+            features.add(obj.strip())
+        elif isinstance(obj, list):
+            for item in obj:
+                name = _extract_feature_name(item)
                 if name:
                     features.add(name)
-        elif isinstance(raw, dict):
-            for cat, items in raw.items():
-                if isinstance(items, list):
-                    for f in items:
-                        name = f if isinstance(f, str) else f.get("label", f.get("name", ""))
+                elif isinstance(item, (dict, list)):
+                    _collect_features(item)
+        elif isinstance(obj, dict):
+            for key, val in obj.items():
+                if key in ("equipments", "features", "equipment", "items",
+                           "comfort", "safety", "entertainment", "extras",
+                           "comfortAndConvenience", "entertainmentAndMedia",
+                           "safetyAndSecurity"):
+                    _collect_features(val)
+                elif isinstance(val, list) and val and isinstance(val[0], (str, dict)):
+                    # Looks like a list of features
+                    for item in val:
+                        name = _extract_feature_name(item)
                         if name:
                             features.add(name)
 
-    # Categorized equipment
-    for key in ("equipmentsByCategory", "featureCategories"):
-        cats = vehicle.get(key, {})
-        if isinstance(cats, dict):
-            for cat, items in cats.items():
-                if isinstance(items, list):
-                    for f in items:
-                        name = f if isinstance(f, str) else f.get("label", f.get("name", ""))
-                        if name:
-                            features.add(name)
-        elif isinstance(cats, list):
-            for cat_obj in cats:
-                items = cat_obj.get("equipments", cat_obj.get("items", []))
-                for f in items:
-                    name = f if isinstance(f, str) else f.get("label", f.get("name", ""))
-                    if name:
-                        features.add(name)
+    # Search in vehicle and listing for equipment data
+    for source in (vehicle, listing):
+        for key in ("equipments", "features", "equipment", "equipmentsByCategory",
+                     "featureCategories", "standardEquipment", "optionalEquipment",
+                     "highlightedFeatures", "allEquipments"):
+            if key in source:
+                _collect_features(source[key])
 
     car["features"] = sorted(features)
 
     # Seller
     seller = listing.get("seller", {})
-    car["seller_name"] = seller.get("companyName", seller.get("name", ""))
-    car["seller_city"] = seller.get("city", seller.get("address", {}).get("city", ""))
-    car["seller_country"] = seller.get("countryCode", seller.get("address", {}).get("country", ""))
+    car["seller_name"] = _stringify(seller.get("companyName", seller.get("name", "")))
+    car["seller_city"] = _stringify(seller.get("city", seller.get("address", {}).get("city", "")))
+    car["seller_country"] = _stringify(seller.get("countryCode", seller.get("address", {}).get("country", "")))
 
-    car["listing_id"] = listing.get("id", listing.get("classifiedId", ""))
+    car["listing_id"] = _stringify(listing.get("id", listing.get("classifiedId", "")))
+
+    # Debug: save top-level keys so we can diagnose missing data
+    car["_vehicle_keys"] = sorted(vehicle.keys()) if vehicle else []
+    car["_listing_keys"] = sorted(listing.keys()) if listing else []
 
     return car
 
@@ -266,7 +308,14 @@ def _parse_json_ld(item: dict) -> dict:
 
 
 def _parse_html(soup) -> dict:
-    """Scrape specs and features directly from HTML DOM."""
+    """Scrape specs and features directly from HTML DOM.
+
+    AutoScout24 renders features in several ways:
+    - <li> items inside equipment/feature containers
+    - <dd> elements in DataGrid sections
+    - Plain text in <span>/<div> elements near category headers
+    - Sometimes as comma-separated text blocks
+    """
     car = {}
 
     # Title
@@ -283,43 +332,121 @@ def _parse_html(soup) -> dict:
     if details:
         car["details_raw"] = details
 
-    # Features from equipment lists
+    # Price from HTML
+    for el in soup.find_all(attrs={"data-testid": re.compile(r"price", re.I)}):
+        text = el.get_text(strip=True)
+        nums = re.findall(r"[\d]+", text.replace(".", "").replace(",", "").replace(" ", ""))
+        if nums:
+            val = int(nums[0])
+            if val > 1000:  # sanity check
+                car["price"] = val
+                car["currency"] = "EUR"
+                break
+    if "price" not in car:
+        for el in soup.find_all(string=re.compile(r"€\s*[\d.,]+")):
+            nums = re.findall(r"[\d]+", str(el).replace(".", "").replace(",", "").replace(" ", ""))
+            if nums:
+                val = int(nums[0])
+                if val > 1000:
+                    car["price"] = val
+                    car["currency"] = "EUR"
+                    break
+
+    # ── Feature extraction (multiple strategies) ──
     features = set()
 
-    # Method 1: <li> items inside equipment/feature containers
-    for el in soup.find_all(attrs={"class": re.compile(r"equipment|feature", re.I)}):
-        for li in el.find_all("li"):
-            text = li.get_text(strip=True)
-            if text and len(text) < 200:
+    CATEGORY_KEYWORDS = {
+        "comfort", "convenience", "entertainment", "media", "safety", "security",
+        "extra", "equipment", "feature", "ausstattung", "komfort", "sicherheit",
+        "unterhaltung", "multimedia", "infotainment",
+    }
+
+    # Helper: is text a plausible feature name?
+    def _is_feature(text):
+        if not text or len(text) > 200 or len(text) < 2:
+            return False
+        # Skip category headers, prices, long descriptions
+        lower = text.lower()
+        if any(lower == kw for kw in CATEGORY_KEYWORDS):
+            return False
+        if text.startswith("€") or text.startswith("$"):
+            return False
+        return True
+
+    # Method 1: <li> items inside containers with equipment/feature class names
+    for el in soup.find_all(attrs={"class": re.compile(r"equipment|feature|EquipmentBlock", re.I)}):
+        for child in el.find_all(["li", "span", "div"]):
+            text = child.get_text(strip=True)
+            if _is_feature(text) and not child.find(["li", "span", "div"]):
                 features.add(text)
 
-    # Method 2: data-cy attributes
-    for el in soup.find_all(attrs={"data-cy": re.compile(r"equipment|feature", re.I)}):
-        text = el.get_text(strip=True)
-        if text and len(text) < 200:
-            features.add(text)
+    # Method 2: data-cy or data-testid attributes
+    for attr in ("data-cy", "data-testid"):
+        for el in soup.find_all(attrs={attr: re.compile(r"equipment|feature", re.I)}):
+            # Get leaf text nodes
+            for child in el.find_all(["li", "span", "div", "p"]):
+                text = child.get_text(strip=True)
+                if _is_feature(text) and not child.find(["li", "span", "div"]):
+                    features.add(text)
+            # Also try direct text
+            text = el.get_text(strip=True)
+            if _is_feature(text):
+                features.add(text)
 
     # Method 3: sections with category headers (Comfort, Safety, etc.)
     for section_class in ("equipment_comfort", "equipment_entertainment",
-                          "equipment_extra", "equipment_safety"):
-        section = soup.find(attrs={"class": re.compile(section_class, re.I)})
-        if section:
-            for li in section.find_all("li"):
-                text = li.get_text(strip=True)
-                if text and len(text) < 200:
+                          "equipment_extra", "equipment_safety",
+                          "EquipmentBlock", "VehicleOverview"):
+        for section in soup.find_all(attrs={"class": re.compile(section_class, re.I)}):
+            for child in section.find_all(["li", "span", "div"]):
+                text = child.get_text(strip=True)
+                if _is_feature(text) and not child.find(["li", "span", "div"]):
                     features.add(text)
 
-    # Method 4: generic list items that look like features
-    for ul in soup.find_all("ul"):
-        parent_text = ""
-        prev = ul.find_previous_sibling()
-        if prev:
-            parent_text = prev.get_text(strip=True).lower()
-        if any(kw in parent_text for kw in ("equipment", "feature", "ausstattung", "comfort", "safety", "entertainment")):
-            for li in ul.find_all("li"):
+    # Method 4: dd elements in DataGrid pairs (AutoScout24's detail layout)
+    for dd in soup.find_all("dd"):
+        cls = " ".join(dd.get("class", []))
+        if "DataGrid" in cls or "default" in cls.lower():
+            for li in dd.find_all("li"):
                 text = li.get_text(strip=True)
-                if text and len(text) < 200:
+                if _is_feature(text):
                     features.add(text)
+            # Some dd elements contain comma-separated features
+            text = dd.get_text(strip=True)
+            if "," in text and len(text) < 500:
+                for part in text.split(","):
+                    part = part.strip()
+                    if _is_feature(part):
+                        features.add(part)
+
+    # Method 5: Look for <ul> lists near category headers
+    for heading in soup.find_all(["h2", "h3", "h4", "dt", "strong", "b"]):
+        heading_text = heading.get_text(strip=True).lower()
+        if any(kw in heading_text for kw in CATEGORY_KEYWORDS):
+            # Look at the next sibling elements for features
+            for sibling in heading.find_next_siblings():
+                if sibling.name in ("h2", "h3", "h4"):
+                    break  # stop at next section
+                for child in sibling.find_all(["li", "span", "div"]):
+                    text = child.get_text(strip=True)
+                    if _is_feature(text) and not child.find(["li", "span", "div"]):
+                        features.add(text)
+
+    # Method 6: Broad fallback — find all <li> items anywhere in the page
+    # that look like feature names (short, no children, in a list context)
+    if len(features) < 5:
+        for li in soup.find_all("li"):
+            # Only leaf <li> elements
+            if li.find("li"):
+                continue
+            text = li.get_text(strip=True)
+            if _is_feature(text) and len(text) < 80:
+                # Avoid nav items, links etc
+                parent = li.parent
+                if parent and parent.name == "ul":
+                    grandparent_class = " ".join(parent.parent.get("class", [])) if parent.parent else ""
+                    if "nav" not in grandparent_class.lower() and "menu" not in grandparent_class.lower():
+                        features.add(text)
 
     car["features"] = sorted(features)
     return car
@@ -432,29 +559,43 @@ def _parse_search_item(item: dict) -> dict | None:
     """Parse a single item from search results __NEXT_DATA__."""
     l = {}
     vehicle = item.get("vehicle", item)
-    l["make"] = vehicle.get("make", item.get("make", ""))
-    l["model"] = vehicle.get("model", item.get("model", ""))
-    l["version"] = vehicle.get("version", vehicle.get("rawVersion", ""))
-    l["mileage_km"] = vehicle.get("mileageInKm", vehicle.get("mileage", ""))
-    l["first_registration"] = vehicle.get("firstRegistrationDate", "")
-    l["fuel_type"] = vehicle.get("fuelType", vehicle.get("fuelCategory", ""))
-    l["power_hp"] = vehicle.get("powerInHp", "")
-    l["transmission"] = vehicle.get("transmissionType", "")
-    l["body_color"] = vehicle.get("bodyColor", "")
+    l["make"] = _stringify(vehicle.get("make", item.get("make", "")))
+    l["model"] = _stringify(vehicle.get("model", item.get("model", "")))
+    l["version"] = _stringify(vehicle.get("version", vehicle.get("rawVersion", "")))
+    l["mileage_km"] = _stringify(vehicle.get("mileageInKm", vehicle.get("mileage", "")))
+    l["first_registration"] = _stringify(vehicle.get("firstRegistrationDate", ""))
+    l["fuel_type"] = _stringify(vehicle.get("fuelType", vehicle.get("fuelCategory", "")))
+    l["power_hp"] = _stringify(vehicle.get("powerInHp", ""))
+    l["transmission"] = _stringify(vehicle.get("transmissionType", ""))
+    l["body_color"] = _stringify(vehicle.get("bodyColor", ""))
 
-    prices = item.get("prices", item.get("price", {}))
+    # Price — handle various formats
+    prices = item.get("prices", item.get("price", item.get("tracking", {}).get("price", {})))
     if isinstance(prices, dict):
-        l["price"] = prices.get("publicPrice", prices.get("price", ""))
-        l["currency"] = prices.get("currency", "EUR")
+        for price_key in ("publicPrice", "price", "amount", "value"):
+            p = prices.get(price_key)
+            if isinstance(p, (int, float)) and p > 0:
+                l["price"] = p
+                break
+            elif isinstance(p, dict):
+                for sub_key in ("value", "amount", "raw"):
+                    sv = p.get(sub_key)
+                    if isinstance(sv, (int, float)) and sv > 0:
+                        l["price"] = sv
+                        break
+        l["currency"] = _stringify(prices.get("currency", "EUR"))
     elif isinstance(prices, (int, float)):
         l["price"] = prices
 
     slug = item.get("url", item.get("detailUrl", item.get("id", "")))
+    if isinstance(slug, dict):
+        slug = slug.get("href", slug.get("url", ""))
+    slug = _stringify(slug)
     if slug and not slug.startswith("http"):
         l["url"] = f"https://www.autoscout24.com/offers/{slug}"
     elif slug:
         l["url"] = slug
-    l["listing_id"] = item.get("id", item.get("classifiedId", slug or ""))
+    l["listing_id"] = _stringify(item.get("id", item.get("classifiedId", slug or "")))
 
     return l if l.get("listing_id") or l.get("url") else None
 

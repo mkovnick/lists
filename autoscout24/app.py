@@ -141,29 +141,37 @@ def _search_worker(params):
             )
         _log(f"Search URL: {search_url}")
 
-        pages = min(int(params.get("pages", 2)), 10)
-        max_scrape = min(int(params.get("max_scrape", 15)), 50)
-        exclude_colors = [c.strip().lower() for c in params.get("exclude_colors", "").split(",") if c.strip()]
-        require_features = [f.strip().lower() for f in params.get("require_features", "").split(",") if f.strip()]
+        max_pages = min(int(params.get("pages", 3)), 20)
+        max_scrape = min(int(params.get("max_scrape", 100)), 100)
 
-        # Step 1: Gather search result metadata
+        # Step 1: Gather search result metadata from all pages
         all_listings = []
-        for pg in range(1, pages + 1):
-            _log(f"Fetching search page {pg}/{pages}...")
+        total_on_site = 0
+        for pg in range(1, max_pages + 1):
+            _log(f"Fetching search page {pg}...")
             listings, total = scrape_search_results(search_url, pg)
+            if total:
+                total_on_site = total
             all_listings.extend(listings)
-            _log(f"  Got {len(listings)} listings (total on site: {total})")
-            if pg < pages:
+            _log(f"  Got {len(listings)} listings (total on site: {total_on_site})")
+            # Stop if we got all results or this page was empty
+            if not listings or len(all_listings) >= total_on_site:
+                _log(f"  All {total_on_site} results fetched across {pg} page(s)")
+                break
+            if pg < max_pages:
                 time.sleep(2)
 
-        # Step 2: Filter by color
-        if exclude_colors:
-            before = len(all_listings)
-            all_listings = [
-                l for l in all_listings
-                if not any(ec in str(l.get("body_color", "")).lower() for ec in exclude_colors)
-            ]
-            _log(f"Color filter: {before} → {len(all_listings)} (excluded {', '.join(exclude_colors)})")
+        # Deduplicate by listing_id
+        seen = set()
+        deduped = []
+        for l in all_listings:
+            lid = l.get("listing_id", "")
+            if lid and lid not in seen:
+                seen.add(lid)
+                deduped.append(l)
+        if len(deduped) < len(all_listings):
+            _log(f"Removed {len(all_listings) - len(deduped)} duplicates")
+        all_listings = deduped
 
         if not all_listings:
             _log("No listings found matching filters.")
@@ -188,15 +196,6 @@ def _search_worker(params):
 
             try:
                 car = scrape_listing(url)
-
-                # Check required features
-                if require_features:
-                    car_feats = " ".join(car.get("features", [])).lower()
-                    missing = [rf for rf in require_features if rf not in car_feats]
-                    if missing:
-                        _log(f"  Skipped — missing: {', '.join(missing)}")
-                        continue
-
                 cars = upsert(cars, car)
                 scraped += 1
                 feat_count = len(car.get("features", []))
@@ -315,7 +314,7 @@ font-size:.72rem;margin:2px}
 <p style="font-size:.72rem;color:var(--muted);margin-top:4px">Set up your filters on AutoScout24, then copy the URL from your browser and paste it here.</p>
 <div class="row" style="margin-top:8px">
  <div><label>Pages to scan</label><input type="number" id="s-pages" value="3" min="1" max="10"></div>
- <div><label>Max cars to scrape</label><input type="number" id="s-max" value="20" min="1" max="50"></div>
+ <div><label>Max cars to scrape</label><input type="number" id="s-max" value="100" min="1" max="100"></div>
 </div>
 <button class="btn btn-primary" id="search-btn" onclick="startSearch()">Scrape All Listings</button>
 
@@ -378,7 +377,7 @@ async function startSearch(){
  if(!url||!url.includes('autoscout24')){alert('Please paste an AutoScout24 search URL');return;}
  const p={
   search_url:url,
-  pages:n('s-pages')||3,max_scrape:n('s-max')||20
+  pages:n('s-pages')||3,max_scrape:n('s-max')||100
  };
  document.getElementById('search-btn').disabled=true;
  document.getElementById('search-progress').style.display='block';
@@ -432,7 +431,7 @@ function renderCars(){
   const fc=(c.features||[]).length;
   return`<div class="card"><h3>${esc(lbl)}</h3>
    <span class="price">${fmtP(c.price)}</span>
-   <span class="meta"> · ${fmtKm(c.mileage_km)} · ${esc(c.body_color||'?')} · ${esc(c.fuel_type||'?')}</span>
+   <span class="meta"> · ${fmtKm(c.mileage_km)} · ${esc(str(c.body_color))} · ${esc(str(c.fuel_type))}</span>
    <span class="feat-count">${fc} features</span>
    ${fc?`<details style="margin-top:6px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Show features</summary>
    <div style="margin-top:4px">${c.features.map(f=>'<span class="tag">'+esc(f)+'</span>').join('')}</div></details>`:''}
@@ -542,8 +541,9 @@ function renderMatrix(){
 function v(id){return document.getElementById(id).value.trim();}
 function n(id){const x=v(id);return x?Number(x):null;}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function fmtP(v){return typeof v==='number'?'€'+v.toLocaleString():(v||'—');}
-function fmtKm(v){return typeof v==='number'?v.toLocaleString()+' km':(v||'—');}
+function fmtP(v){return typeof v==='number'?'€'+v.toLocaleString():(typeof v==='string'&&v?v:'—');}
+function fmtKm(v){return typeof v==='number'?v.toLocaleString()+' km':(typeof v==='string'&&v?v:'—');}
+function str(v){if(v==null)return'—';if(typeof v==='object')return v.label||v.name||v.value||v.formatted||'—';return ''+v||'—';}
 
 loadCars();
 </script>
