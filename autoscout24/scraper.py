@@ -597,6 +597,9 @@ def scrape_search_results(url: str, page_num: int = 1, _browser_ctx=None) -> tup
 
             items = []
             if isinstance(search, dict):
+                # Log all total-like keys for debugging
+                total_keys = {k: v for k, v in search.items() if isinstance(v, (int, float))}
+                print(f"[scraper] Numeric keys in search container: {total_keys}")
                 for tk in ("totalCount", "numberOfResults", "total"):
                     if tk in search:
                         total = search[tk]
@@ -675,13 +678,23 @@ def scrape_all_search_pages(url: str, max_pages: int = 5, on_progress=None) -> l
     import time
     all_listings = []
     total_on_site = 0
+    page1_count = 0
 
     pw, browser, context = _launch_browser()
     try:
         for pg in range(1, max_pages + 1):
             listings, total = scrape_search_results(url, pg, _browser_ctx=(pw, browser, context))
-            if total:
+
+            if pg == 1:
+                page1_count = len(listings)
+
+            # Only trust 'total' as site-wide total if it's bigger than page 1 count
+            if total and total > page1_count:
                 total_on_site = total
+            elif total and pg == 1:
+                # total == page1_count — might be per-page count, don't use as stop condition
+                print(f"[scraper] total ({total}) == page 1 count ({page1_count}), ignoring as stop condition")
+
             all_listings.extend(listings)
             print(f"[scraper] Page {pg}: got {len(listings)}, running total {len(all_listings)}/{total_on_site}")
             if on_progress:
