@@ -116,74 +116,71 @@ def api_search_status():
 
 
 def _search_worker(params):
-    """Background worker: search → filter → scrape each listing."""
-    _job.update(running=True, status="Starting search...", progress=0, total=0, log=[])
+    """Background worker: search or batch URLs → scrape each listing."""
+    _job.update(running=True, status="Starting...", progress=0, total=0, log=[])
 
     try:
-        from scraper import build_search_url, scrape_search_results, scrape_listing
+        from scraper import scrape_search_results, scrape_listing
 
-        # Use raw URL if provided, otherwise build from filters
+        # Mode 1: Direct list of URLs (from Add URLs tab)
+        direct_urls = params.get("urls", [])
+        # Mode 2: Search URL (from Search tab)
         search_url = params.get("search_url", "").strip()
-        if search_url and "autoscout24" in search_url:
-            _log(f"Using your search URL directly")
-        else:
-            search_url = build_search_url(
-                make=params.get("make", ""),
-                model=params.get("model", ""),
-                price_from=params.get("price_from"),
-                price_to=params.get("price_to"),
-                year_from=params.get("year_from"),
-                year_to=params.get("year_to"),
-                km_to=params.get("km_to"),
-                fuel=params.get("fuel", ""),
-                gear=params.get("gear", ""),
-                country=params.get("country", ""),
-            )
-        _log(f"Search URL: {search_url}")
 
-        max_pages = min(int(params.get("pages", 3)), 20)
-        max_scrape = min(int(params.get("max_scrape", 100)), 100)
-
-        # Step 1: Gather search result metadata from all pages
         all_listings = []
-        total_on_site = 0
-        for pg in range(1, max_pages + 1):
-            _log(f"Fetching search page {pg}...")
-            listings, total = scrape_search_results(search_url, pg)
-            if total:
-                total_on_site = total
-            all_listings.extend(listings)
-            _log(f"  Got {len(listings)} listings (total on site: {total_on_site})")
-            # Stop only if page returned zero results (no more pages)
-            if not listings:
-                _log(f"  Empty page — no more results. Stopping.")
-                break
-            if pg < max_pages:
-                time.sleep(2)
 
-        # Deduplicate by listing_id
-        seen = set()
-        deduped = []
-        for l in all_listings:
-            lid = l.get("listing_id", "")
-            if lid and lid not in seen:
-                seen.add(lid)
-                deduped.append(l)
-        if len(deduped) < len(all_listings):
-            _log(f"Removed {len(all_listings) - len(deduped)} duplicates")
-        all_listings = deduped
+        if direct_urls:
+            _log(f"Batch mode: {len(direct_urls)} URLs to scrape")
+            for url in direct_urls:
+                url = url.strip().split("?source=")[0]  # strip tracking params
+                slug = url.rstrip("/").split("/")[-1]
+                all_listings.append({"url": url, "listing_id": slug})
+        elif search_url and "autoscout24" in search_url:
+            _log(f"Search URL: {search_url}")
+            max_pages = min(int(params.get("pages", 3)), 20)
+
+            total_on_site = 0
+            for pg in range(1, max_pages + 1):
+                _log(f"Fetching search page {pg}...")
+                listings, total = scrape_search_results(search_url, pg)
+                if total:
+                    total_on_site = total
+                all_listings.extend(listings)
+                _log(f"  Got {len(listings)} listings (total on site: {total_on_site})")
+                if not listings:
+                    _log(f"  Empty page — no more results.")
+                    break
+                if pg < max_pages:
+                    time.sleep(2)
+
+            # Deduplicate
+            seen = set()
+            deduped = []
+            for l in all_listings:
+                lid = l.get("listing_id", "")
+                if lid and lid not in seen:
+                    seen.add(lid)
+                    deduped.append(l)
+            if len(deduped) < len(all_listings):
+                _log(f"Removed {len(all_listings) - len(deduped)} duplicates")
+            all_listings = deduped
+        else:
+            _log("Error: no URLs or search URL provided")
+            return
 
         if not all_listings:
             _log("No listings found matching filters.")
             return
 
-        # Step 3: Scrape each listing in detail for features
-        _job["total"] = min(len(all_listings), max_scrape)
+        # Step 2: Scrape each listing in detail for features
+        max_scrape = int(params.get("max_scrape", 100))
+        scrape_count = min(len(all_listings), max_scrape) if not direct_urls else len(all_listings)
+        _job["total"] = scrape_count
         cars = load_cars()
         scraped = 0
 
         for i, listing in enumerate(all_listings):
-            if scraped >= max_scrape:
+            if scraped >= scrape_count:
                 break
 
             url = listing.get("url", "")
@@ -302,7 +299,7 @@ font-size:.72rem;margin:2px}
 
 <div class="tabs">
 <div class="tab active" data-t="search">Search</div>
-<div class="tab" data-t="add">Add URL</div>
+<div class="tab" data-t="add">Add URLs</div>
 <div class="tab" data-t="cars">Cars <span id="cnt"></span></div>
 <div class="tab" data-t="matrix">Export</div>
 </div>
@@ -325,12 +322,19 @@ font-size:.72rem;margin:2px}
 </div>
 </div>
 
-<!-- ══ ADD URL ══ -->
+<!-- ══ ADD URLs ══ -->
 <div id="add" class="pane">
-<label>Paste AutoScout24 listing URL</label>
-<input type="url" id="add-url" placeholder="https://www.autoscout24.com/offers/...">
-<button class="btn btn-primary" onclick="scrapeOne()">Scrape This Listing</button>
-<div id="add-status"></div>
+<label>Paste listing URLs (one per line)</label>
+<textarea id="add-urls" rows="8" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.8rem;font-family:monospace" placeholder="https://www.autoscout24.com/offers/...
+https://www.autoscout24.com/offers/...
+https://www.autoscout24.com/offers/..."></textarea>
+<p style="font-size:.72rem;color:var(--muted);margin-top:4px">Paste AutoScout24 listing URLs, one per line. All will be scraped for features.</p>
+<button class="btn btn-primary" id="add-btn" onclick="scrapeBatch()">Scrape All URLs</button>
+<div id="add-progress" style="display:none">
+ <div class="progress-bar"><div class="progress-fill" id="add-pbar"></div></div>
+ <div id="add-ptext" style="font-size:.8rem;color:var(--muted)"></div>
+ <div class="log" id="add-plog"></div>
+</div>
 </div>
 
 <!-- ══ MY CARS ══ -->
@@ -382,42 +386,43 @@ async function startSearch(){
  try{
   const r=await(await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
   if(r.error){alert(r.error);return;}
-  pollTimer=setInterval(pollSearch,1500);
+  pollTimer=setInterval(()=>pollBatch('pbar','ptext','plog','search-btn'),1500);
  }catch(e){alert(e);}
 }
 
-async function pollSearch(){
+// Scrape batch URLs
+async function scrapeBatch(){
+ const raw=document.getElementById('add-urls').value;
+ const urls=raw.split('\n').map(s=>s.trim()).filter(s=>s.startsWith('http'));
+ if(!urls.length){alert('Paste at least one URL');return;}
+ const p={urls:urls};
+ document.getElementById('add-btn').disabled=true;
+ document.getElementById('add-progress').style.display='block';
+ try{
+  const r=await(await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  if(r.error){alert(r.error);document.getElementById('add-btn').disabled=false;return;}
+  // Reuse the same poll mechanism as search
+  pollTimer=setInterval(()=>pollBatch('add-pbar','add-ptext','add-plog','add-btn'),1500);
+ }catch(e){alert(e);document.getElementById('add-btn').disabled=false;}
+}
+
+async function pollBatch(barId,textId,logId,btnId){
  const r=await(await fetch('/api/search/status')).json();
  const pct=r.total?Math.round(r.progress/r.total*100):0;
- document.getElementById('pbar').style.width=pct+'%';
- document.getElementById('ptext').textContent=r.status;
- document.getElementById('plog').textContent=r.log.join('\n');
- document.getElementById('plog').scrollTop=9999;
+ document.getElementById(barId).style.width=pct+'%';
+ document.getElementById(textId).textContent=r.status;
+ document.getElementById(logId).textContent=r.log.join('\n');
+ document.getElementById(logId).scrollTop=9999;
  if(!r.running){
   clearInterval(pollTimer);
-  document.getElementById('search-btn').disabled=false;
+  document.getElementById(btnId).disabled=false;
   await loadCars();
-  // Auto-switch to feature matrix
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
   document.querySelector('[data-t="matrix"]').classList.add('active');
   document.getElementById('matrix').classList.add('active');
   renderMatrix();
  }
-}
-
-// Scrape single
-async function scrapeOne(){
- const url=v('add-url');
- if(!url)return;
- document.getElementById('add-status').innerHTML='<div class="card">Scraping... ~20s</div>';
- try{
-  const r=await(await fetch('/api/scrape',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
-  if(r.error){document.getElementById('add-status').innerHTML='<div class="card" style="color:var(--red)">'+esc(r.error)+'</div>';return;}
-  const c=r.car;
-  document.getElementById('add-status').innerHTML=`<div class="card"><h3>${esc(c.make)} ${esc(c.model)}</h3><span class="price">${fmtP(c.price)}</span> · ${(c.features||[]).length} features scraped</div>`;
-  await loadCars();
- }catch(e){document.getElementById('add-status').innerHTML='<div class="card" style="color:var(--red)">'+esc(''+e)+'</div>';}
 }
 
 // Car list
