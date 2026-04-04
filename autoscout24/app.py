@@ -116,26 +116,19 @@ def api_search_status():
 
 
 def _search_worker(params):
-    """Background worker: search or batch URLs → scrape each listing."""
+    """Background worker: search + batch URLs → scrape each listing."""
     _job.update(running=True, status="Starting...", progress=0, total=0, log=[])
 
     try:
         from scraper import scrape_search_results, scrape_listing
 
-        # Mode 1: Direct list of URLs (from Add URLs tab)
         direct_urls = params.get("urls", [])
-        # Mode 2: Search URL (from Search tab)
         search_url = params.get("search_url", "").strip()
 
         all_listings = []
 
-        if direct_urls:
-            _log(f"Batch mode: {len(direct_urls)} URLs to scrape")
-            for url in direct_urls:
-                url = url.strip().split("?source=")[0]  # strip tracking params
-                slug = url.rstrip("/").split("/")[-1]
-                all_listings.append({"url": url, "listing_id": slug})
-        elif search_url and "autoscout24" in search_url:
+        # Step 1a: Fetch from search URL if provided
+        if search_url and "autoscout24" in search_url:
             _log(f"Search URL: {search_url}")
             max_pages = min(int(params.get("pages", 3)), 20)
 
@@ -153,35 +146,43 @@ def _search_worker(params):
                 if pg < max_pages:
                     time.sleep(2)
 
-            # Deduplicate
-            seen = set()
-            deduped = []
-            for l in all_listings:
-                lid = l.get("listing_id", "")
-                if lid and lid not in seen:
-                    seen.add(lid)
-                    deduped.append(l)
-            if len(deduped) < len(all_listings):
-                _log(f"Removed {len(all_listings) - len(deduped)} duplicates")
-            all_listings = deduped
-        else:
+        # Step 1b: Add individual URLs
+        if direct_urls:
+            _log(f"Adding {len(direct_urls)} individual URL(s)")
+            for url in direct_urls:
+                url = url.strip()
+                # Strip tracking params but keep the offer path
+                if "?" in url:
+                    url = url.split("?")[0]
+                slug = url.rstrip("/").split("/")[-1]
+                all_listings.append({"url": url, "listing_id": slug})
+
+        if not search_url and not direct_urls:
             _log("Error: no URLs or search URL provided")
             return
+
+        # Deduplicate by listing_id
+        seen = set()
+        deduped = []
+        for l in all_listings:
+            lid = l.get("listing_id", "")
+            if lid and lid not in seen:
+                seen.add(lid)
+                deduped.append(l)
+        if len(deduped) < len(all_listings):
+            _log(f"Merged & deduplicated: {len(all_listings)} → {len(deduped)} unique listings")
+        all_listings = deduped
 
         if not all_listings:
             _log("No listings found matching filters.")
             return
 
         # Step 2: Scrape each listing in detail for features
-        max_scrape = int(params.get("max_scrape", 100))
-        scrape_count = min(len(all_listings), max_scrape) if not direct_urls else len(all_listings)
-        _job["total"] = scrape_count
+        _job["total"] = len(all_listings)
         cars = load_cars()
         scraped = 0
 
         for i, listing in enumerate(all_listings):
-            if scraped >= scrape_count:
-                break
 
             url = listing.get("url", "")
             if not url:
@@ -298,42 +299,32 @@ font-size:.72rem;margin:2px}
 <p class="sub">Search, scrape & compare car features</p>
 
 <div class="tabs">
-<div class="tab active" data-t="search">Search</div>
-<div class="tab" data-t="add">Add URLs</div>
+<div class="tab active" data-t="scrape">Scrape</div>
 <div class="tab" data-t="cars">Cars <span id="cnt"></span></div>
 <div class="tab" data-t="matrix">Export</div>
 </div>
 
-<!-- ══ SEARCH ══ -->
-<div id="search" class="pane active">
-<label>Paste your AutoScout24 search URL</label>
-<input type="url" id="s-url" placeholder="https://www.autoscout24.com/lst/mercedes-benz/c-series-...">
-<p style="font-size:.72rem;color:var(--muted);margin-top:4px">Set up your filters on AutoScout24, then copy the URL from your browser and paste it here.</p>
-<div class="row" style="margin-top:8px">
- <div><label>Pages to scan</label><input type="number" id="s-pages" value="3" min="1" max="10"></div>
- <div><label>Max cars to scrape</label><input type="number" id="s-max" value="100" min="1" max="100"></div>
-</div>
-<button class="btn btn-primary" id="search-btn" onclick="startSearch()">Scrape All Listings</button>
+<!-- ══ SCRAPE ══ -->
+<div id="scrape" class="pane active">
+<label>Search URL (optional — scrapes all results from your search)</label>
+<input type="url" id="s-url" placeholder="https://www.autoscout24.com/lst/mercedes-benz/...">
 
-<div id="search-progress" style="display:none">
+<label style="margin-top:12px">Individual listing URLs (optional — one per line)</label>
+<textarea id="add-urls" rows="6" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.8rem;font-family:monospace" placeholder="https://www.autoscout24.com/offers/...
+https://www.autoscout24.com/offers/..."></textarea>
+
+<p style="font-size:.72rem;color:var(--muted);margin-top:4px">Use both fields together — results are merged and deduplicated. The search URL finds all listings matching your filters, and individual URLs catch any extras you spotted.</p>
+
+<div class="row" style="margin-top:8px">
+ <div><label>Search pages</label><input type="number" id="s-pages" value="3" min="1" max="10"></div>
+ <div></div>
+</div>
+<button class="btn btn-primary" id="scrape-btn" onclick="startScrape()">Scrape Everything</button>
+
+<div id="scrape-progress" style="display:none">
  <div class="progress-bar"><div class="progress-fill" id="pbar"></div></div>
  <div id="ptext" style="font-size:.8rem;color:var(--muted)"></div>
  <div class="log" id="plog"></div>
-</div>
-</div>
-
-<!-- ══ ADD URLs ══ -->
-<div id="add" class="pane">
-<label>Paste listing URLs (one per line)</label>
-<textarea id="add-urls" rows="8" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.8rem;font-family:monospace" placeholder="https://www.autoscout24.com/offers/...
-https://www.autoscout24.com/offers/...
-https://www.autoscout24.com/offers/..."></textarea>
-<p style="font-size:.72rem;color:var(--muted);margin-top:4px">Paste AutoScout24 listing URLs, one per line. All will be scraped for features.</p>
-<button class="btn btn-primary" id="add-btn" onclick="scrapeBatch()">Scrape All URLs</button>
-<div id="add-progress" style="display:none">
- <div class="progress-bar"><div class="progress-fill" id="add-pbar"></div></div>
- <div id="add-ptext" style="font-size:.8rem;color:var(--muted)"></div>
- <div class="log" id="add-plog"></div>
 </div>
 </div>
 
@@ -373,49 +364,36 @@ async function loadCars(){
  document.getElementById('cnt').textContent='('+cars.length+')';
 }
 
-// Search
-async function startSearch(){
- const url=v('s-url');
- if(!url||!url.includes('autoscout24')){alert('Please paste an AutoScout24 search URL');return;}
+// Scrape (combined search + individual URLs)
+async function startScrape(){
+ const searchUrl=v('s-url');
+ const rawUrls=document.getElementById('add-urls').value;
+ const urls=rawUrls.split('\n').map(s=>s.trim()).filter(s=>s.startsWith('http'));
+ if(!searchUrl&&!urls.length){alert('Paste a search URL, individual listing URLs, or both.');return;}
  const p={
-  search_url:url,
-  pages:n('s-pages')||3,max_scrape:n('s-max')||100
+  search_url:searchUrl||'',
+  urls:urls,
+  pages:n('s-pages')||3
  };
- document.getElementById('search-btn').disabled=true;
- document.getElementById('search-progress').style.display='block';
+ document.getElementById('scrape-btn').disabled=true;
+ document.getElementById('scrape-progress').style.display='block';
  try{
   const r=await(await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(r.error){alert(r.error);return;}
-  pollTimer=setInterval(()=>pollBatch('pbar','ptext','plog','search-btn'),1500);
- }catch(e){alert(e);}
+  if(r.error){alert(r.error);document.getElementById('scrape-btn').disabled=false;return;}
+  pollTimer=setInterval(pollProgress,1500);
+ }catch(e){alert(e);document.getElementById('scrape-btn').disabled=false;}
 }
 
-// Scrape batch URLs
-async function scrapeBatch(){
- const raw=document.getElementById('add-urls').value;
- const urls=raw.split('\n').map(s=>s.trim()).filter(s=>s.startsWith('http'));
- if(!urls.length){alert('Paste at least one URL');return;}
- const p={urls:urls};
- document.getElementById('add-btn').disabled=true;
- document.getElementById('add-progress').style.display='block';
- try{
-  const r=await(await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(r.error){alert(r.error);document.getElementById('add-btn').disabled=false;return;}
-  // Reuse the same poll mechanism as search
-  pollTimer=setInterval(()=>pollBatch('add-pbar','add-ptext','add-plog','add-btn'),1500);
- }catch(e){alert(e);document.getElementById('add-btn').disabled=false;}
-}
-
-async function pollBatch(barId,textId,logId,btnId){
+async function pollProgress(){
  const r=await(await fetch('/api/search/status')).json();
  const pct=r.total?Math.round(r.progress/r.total*100):0;
- document.getElementById(barId).style.width=pct+'%';
- document.getElementById(textId).textContent=r.status;
- document.getElementById(logId).textContent=r.log.join('\n');
- document.getElementById(logId).scrollTop=9999;
+ document.getElementById('pbar').style.width=pct+'%';
+ document.getElementById('ptext').textContent=r.status;
+ document.getElementById('plog').textContent=r.log.join('\n');
+ document.getElementById('plog').scrollTop=9999;
  if(!r.running){
   clearInterval(pollTimer);
-  document.getElementById(btnId).disabled=false;
+  document.getElementById('scrape-btn').disabled=false;
   await loadCars();
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
