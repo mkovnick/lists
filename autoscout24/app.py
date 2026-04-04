@@ -130,7 +130,7 @@ def _search_worker(params):
         # Step 1a: Fetch from search URL if provided
         if search_url and "autoscout24" in search_url:
             _log(f"Search URL: {search_url}")
-            max_pages = min(int(params.get("pages", 3)), 20)
+            max_pages = min(int(params.get("pages", 5)), 20)
 
             total_on_site = 0
             for pg in range(1, max_pages + 1):
@@ -143,8 +143,15 @@ def _search_worker(params):
                 if not listings:
                     _log(f"  Empty page — no more results.")
                     break
+                # Keep going if we haven't collected all results yet
+                if len(all_listings) >= total_on_site and total_on_site > 0:
+                    _log(f"  Collected all {len(all_listings)} of {total_on_site} listings.")
+                    break
                 if pg < max_pages:
                     time.sleep(2)
+
+            if total_on_site > len(all_listings):
+                _log(f"  Warning: site reports {total_on_site} results but only scraped {len(all_listings)}")
 
         # Step 1b: Add individual URLs
         if direct_urls:

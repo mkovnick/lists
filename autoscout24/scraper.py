@@ -507,21 +507,25 @@ def _parse_html(soup) -> dict:
     return car
 
 
+def _set_page_param(url: str, page_num: int) -> str:
+    """Set the page= parameter in a URL without re-encoding other params."""
+    if re.search(r'[?&]page=\d+', url):
+        # Replace existing page= parameter
+        return re.sub(r'([?&])page=\d+', rf'\g<1>page={page_num}', url)
+    elif '?' in url:
+        return url + f'&page={page_num}'
+    else:
+        return url + f'?page={page_num}'
+
+
 def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]:
     """Scrape an AutoScout24 search results page. Returns (listings, total_count).
 
     Accepts either a constructed URL or a raw URL pasted from AutoScout24.
     Handles the page= parameter intelligently.
     """
-    import time
-    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-
-    # Handle pagination: always set the page= parameter explicitly
-    parsed = urlparse(url)
-    params = parse_qs(parsed.query, keep_blank_values=True)
-    params["page"] = [str(page_num)]
-    new_query = urlencode(params, doseq=True)
-    url = urlunparse(parsed._replace(query=new_query))
+    fetch_url = _set_page_param(url, page_num)
+    print(f"[scraper] Fetching page {page_num}: {fetch_url}")
 
     pw, browser, context = _launch_browser()
     try:
@@ -530,10 +534,17 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
             "**/*.{png,jpg,jpeg,gif,svg,webp,woff,woff2,ttf}",
             lambda route: route.abort(),
         )
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.goto(fetch_url, wait_until="domcontentloaded", timeout=60000)
         _accept_cookies(page)
         page.wait_for_timeout(3000)
+
+        # Scroll down to ensure lazy-loaded content renders
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(2000)
+
         html = page.content()
+        final_url = page.url
+        print(f"[scraper] Final URL after load: {final_url}")
     finally:
         browser.close()
         pw.stop()
@@ -549,25 +560,58 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
         try:
             nd = json.loads(script.string)
             pp = nd.get("props", {}).get("pageProps", {})
-            search = pp.get("listings", pp.get("searchResult", {}))
+
+            # Log available keys for debugging
+            print(f"[scraper] pageProps keys: {list(pp.keys())}")
+
+            # Try multiple possible keys for the search results container
+            search = None
+            for key in ("listings", "searchResult", "listingSearch", "search", "data"):
+                if key in pp:
+                    search = pp[key]
+                    print(f"[scraper] Found results under key '{key}', type={type(search).__name__}")
+                    break
+
+            if search is None:
+                # Try one level deeper
+                for k, v in pp.items():
+                    if isinstance(v, dict) and any(
+                        sk in v for sk in ("listings", "items", "results", "totalCount")
+                    ):
+                        search = v
+                        print(f"[scraper] Found results under nested key '{k}'")
+                        break
+
+            items = []
             if isinstance(search, dict):
-                total = search.get("totalCount", search.get("numberOfResults", 0))
-                items = search.get("listings", search.get("items", search.get("results", [])))
+                for tk in ("totalCount", "numberOfResults", "total"):
+                    if tk in search:
+                        total = search[tk]
+                        break
+                for ik in ("listings", "items", "results", "edges", "nodes"):
+                    if ik in search and isinstance(search[ik], list):
+                        items = search[ik]
+                        print(f"[scraper] Items key '{ik}', count={len(items)}")
+                        break
             elif isinstance(search, list):
                 items = search
                 total = len(items)
-            else:
-                items = []
+
             for item in items:
+                # Handle GraphQL-style {node: ...} wrappers
+                if isinstance(item, dict) and "node" in item and len(item) <= 2:
+                    item = item["node"]
                 l = _parse_search_item(item)
                 if l:
                     listings.append(l)
+            print(f"[scraper] Parsed {len(listings)} listings from __NEXT_DATA__ (total={total})")
             if listings:
                 return listings, total
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            print(f"[scraper] __NEXT_DATA__ parse error: {e}")
 
     # Fallback: parse HTML (ul[role=list] > li)
+    print(f"[scraper] Falling back to HTML parsing for page {page_num}")
     ul = soup.find("ul", role="list")
     articles = (ul.find_all("li") if ul else []) or soup.find_all("article")
     for article in articles:
