@@ -75,6 +75,13 @@ def api_delete():
     return jsonify({"ok": True, "count": len(cars)})
 
 
+@app.route("/api/clear", methods=["POST"])
+def api_clear():
+    """Delete all cars from the database."""
+    save_cars([])
+    return jsonify({"ok": True, "count": 0})
+
+
 @app.route("/api/scrape", methods=["POST"])
 def api_scrape():
     """Scrape a single listing URL."""
@@ -120,38 +127,23 @@ def _search_worker(params):
     _job.update(running=True, status="Starting...", progress=0, total=0, log=[])
 
     try:
-        from scraper import scrape_search_results, scrape_listing
+        from scraper import scrape_all_search_pages, scrape_listing
 
         direct_urls = params.get("urls", [])
         search_url = params.get("search_url", "").strip()
 
         all_listings = []
 
-        # Step 1a: Fetch from search URL if provided
+        # Step 1a: Fetch from search URL if provided (single browser session)
         if search_url and "autoscout24" in search_url:
             _log(f"Search URL: {search_url}")
             max_pages = min(int(params.get("pages", 5)), 20)
 
-            total_on_site = 0
-            for pg in range(1, max_pages + 1):
-                _log(f"Fetching search page {pg}...")
-                listings, total = scrape_search_results(search_url, pg)
-                if total:
-                    total_on_site = total
-                all_listings.extend(listings)
-                _log(f"  Got {len(listings)} listings (total on site: {total_on_site})")
-                if not listings:
-                    _log(f"  Empty page — no more results.")
-                    break
-                # Keep going if we haven't collected all results yet
-                if len(all_listings) >= total_on_site and total_on_site > 0:
-                    _log(f"  Collected all {len(all_listings)} of {total_on_site} listings.")
-                    break
-                if pg < max_pages:
-                    time.sleep(2)
+            def _on_page(pg, count, total):
+                _log(f"  Page {pg}: got {count} listings (site total: {total})")
 
-            if total_on_site > len(all_listings):
-                _log(f"  Warning: site reports {total_on_site} results but only scraped {len(all_listings)}")
+            all_listings = scrape_all_search_pages(search_url, max_pages, on_progress=_on_page)
+            _log(f"Search complete: {len(all_listings)} listings found")
 
         # Step 1b: Add individual URLs
         if direct_urls:
@@ -337,6 +329,7 @@ https://www.autoscout24.com/offers/..."></textarea>
 
 <!-- ══ MY CARS ══ -->
 <div id="cars" class="pane">
+<button class="btn btn-secondary" onclick="clearAll()" style="background:var(--red);color:#fff;margin-bottom:10px;max-width:200px">Clear All Cars</button>
 <div id="car-list"></div>
 </div>
 
@@ -438,6 +431,12 @@ function renderCars(){
 async function delCar(lid){
  if(!confirm('Remove this car?'))return;
  await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({listing_id:lid})});
+ await loadCars();renderCars();
+}
+
+async function clearAll(){
+ if(!confirm('Delete ALL cars from the database? This cannot be undone.'))return;
+ await fetch('/api/clear',{method:'POST',headers:{'Content-Type':'application/json'}});
  await loadCars();renderCars();
 }
 

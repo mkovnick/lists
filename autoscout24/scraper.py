@@ -518,16 +518,22 @@ def _set_page_param(url: str, page_num: int) -> str:
         return url + f'?page={page_num}'
 
 
-def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]:
+def scrape_search_results(url: str, page_num: int = 1, _browser_ctx=None) -> tuple[list[dict], int]:
     """Scrape an AutoScout24 search results page. Returns (listings, total_count).
 
     Accepts either a constructed URL or a raw URL pasted from AutoScout24.
     Handles the page= parameter intelligently.
+    If _browser_ctx is provided as (pw, browser, context), reuses that session.
     """
     fetch_url = _set_page_param(url, page_num)
     print(f"[scraper] Fetching page {page_num}: {fetch_url}")
 
-    pw, browser, context = _launch_browser()
+    own_browser = _browser_ctx is None
+    if own_browser:
+        pw, browser, context = _launch_browser()
+    else:
+        pw, browser, context = _browser_ctx
+
     try:
         page = context.new_page()
         page.route(
@@ -545,7 +551,14 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
         html = page.content()
         final_url = page.url
         print(f"[scraper] Final URL after load: {final_url}")
-    finally:
+        page.close()
+    except Exception:
+        if own_browser:
+            browser.close()
+            pw.stop()
+        raise
+
+    if own_browser:
         browser.close()
         pw.stop()
 
@@ -610,7 +623,7 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             print(f"[scraper] __NEXT_DATA__ parse error: {e}")
 
-    # Fallback: parse HTML (ul[role=list] > li)
+    # Fallback: parse HTML (ul[role=list] > li, article, or links to /offers/)
     print(f"[scraper] Falling back to HTML parsing for page {page_num}")
     ul = soup.find("ul", role="list")
     articles = (ul.find_all("li") if ul else []) or soup.find_all("article")
@@ -651,6 +664,41 @@ def scrape_search_results(url: str, page_num: int = 1) -> tuple[list[dict], int]
             total = int(m.group(1).replace(".", "").replace(",", ""))
 
     return listings, total
+
+
+def scrape_all_search_pages(url: str, max_pages: int = 5, on_progress=None) -> list[dict]:
+    """Scrape all pages of search results using a SINGLE browser session.
+
+    Returns a flat list of all listings found across pages.
+    on_progress(page_num, page_count, total_on_site) is called after each page.
+    """
+    import time
+    all_listings = []
+    total_on_site = 0
+
+    pw, browser, context = _launch_browser()
+    try:
+        for pg in range(1, max_pages + 1):
+            listings, total = scrape_search_results(url, pg, _browser_ctx=(pw, browser, context))
+            if total:
+                total_on_site = total
+            all_listings.extend(listings)
+            print(f"[scraper] Page {pg}: got {len(listings)}, running total {len(all_listings)}/{total_on_site}")
+            if on_progress:
+                on_progress(pg, len(listings), total_on_site)
+            if not listings:
+                print(f"[scraper] Page {pg} empty — stopping.")
+                break
+            if total_on_site > 0 and len(all_listings) >= total_on_site:
+                print(f"[scraper] Collected all {len(all_listings)} of {total_on_site}.")
+                break
+            if pg < max_pages:
+                time.sleep(2)
+    finally:
+        browser.close()
+        pw.stop()
+
+    return all_listings
 
 
 def _parse_search_item(item: dict) -> dict | None:
