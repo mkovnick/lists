@@ -490,44 +490,48 @@ function renderMatrix(){
   <div class="stat"><div class="val">${feats.length}</div><div class="lbl">Features</div></div>
  `;
 
- // Build export text
+ // Build export text — COMPACT FORMAT
+ // Instead of a giant NxM grid, list standard features once,
+ // then per-car only show what's different
  let lines=[];
 
- // ── Section 1: Car details ──
- lines.push('=== AUTOSCOUT24 SCRAPED DATA ===');
+ // Classify features
+ const common=feats.filter(f=>carFeats.every(s=>s.has(f)));
+ const varying=feats.filter(f=>!carFeats.every(s=>s.has(f)));
+
+ lines.push(`=== AUTOSCOUT24 SCRAPED DATA ===`);
  lines.push(`Model: ${modelName}`);
- lines.push(`${sorted.length} cars scraped, ${feats.length} unique features found`);
+ lines.push(`${sorted.length} cars | ${feats.length} unique features | ${common.length} standard | ${varying.length} differ`);
+
+ // Per-car block: specs + only the VARYING features this car HAS
  lines.push('');
- lines.push('=== CAR DETAILS ===');
+ lines.push('=== CARS (sorted by most features) ===');
  sorted.forEach((c,i)=>{
   const label=[c.make,c.model,c.version].filter(Boolean).join(' ')||c.title||'?';
+  const extras=varying.filter(f=>carFeats[i].has(f));
+  const missing=varying.filter(f=>!carFeats[i].has(f));
   lines.push('');
-  lines.push(`--- Car ${i+1}: ${label} ---`);
-  if(c.url) lines.push(`URL: ${c.url}`);
-  if(c.price) lines.push(`Price: €${typeof c.price==='number'?c.price.toLocaleString('de-DE'):c.price}`);
-  if(c.mileage_km) lines.push(`Mileage: ${typeof c.mileage_km==='number'?c.mileage_km.toLocaleString('de-DE'):c.mileage_km} km`);
-  if(c.first_registration) lines.push(`First registration: ${str(c.first_registration)}`);
-  if(c.fuel_type) lines.push(`Fuel: ${str(c.fuel_type)}`);
-  if(c.power_hp) lines.push(`Power: ${str(c.power_hp)} HP`);
-  if(c.power_kw) lines.push(`Power: ${str(c.power_kw)} kW`);
-  if(c.transmission) lines.push(`Transmission: ${str(c.transmission)}`);
-  if(c.body_color) lines.push(`Color: ${str(c.body_color)}`);
-  if(c.body_type) lines.push(`Body: ${str(c.body_type)}`);
+  lines.push(`[Car ${i+1}] ${label}`);
+  const parts=[];
+  if(c.price) parts.push(`€${typeof c.price==='number'?c.price.toLocaleString('de-DE'):c.price}`);
+  if(c.mileage_km) parts.push(`${typeof c.mileage_km==='number'?c.mileage_km.toLocaleString('de-DE'):c.mileage_km} km`);
+  if(c.first_registration) parts.push(`Reg: ${str(c.first_registration)}`);
+  if(c.body_color) parts.push(str(c.body_color));
+  if(c.fuel_type) parts.push(str(c.fuel_type));
+  if(c.power_hp) parts.push(`${str(c.power_hp)} HP`);
+  if(c.transmission) parts.push(str(c.transmission));
+  lines.push(parts.join(' | '));
+  if(c.url) lines.push(c.url);
   if(c.seller_name) lines.push(`Seller: ${str(c.seller_name)}, ${str(c.seller_city)} ${str(c.seller_country)}`);
-  lines.push(`Features: ${(c.features||[]).length}`);
+  lines.push(`Has (${extras.length}/${varying.length} optional): ${extras.join(', ')}`);
+  lines.push(`Missing (${missing.length}): ${missing.join(', ')}`);
  });
 
- // ── Section 2: Feature comparison table ──
- lines.push('');
- lines.push('=== FEATURE COMPARISON TABLE ===');
- lines.push('(✓ = has, ✗ = missing)');
- lines.push('');
- const shortLabels=sorted.map((c,i)=>`Car${i+1}`);
- lines.push('Feature\t'+shortLabels.join('\t'));
- for(const f of feats){
-  const row=[f];
-  carFeats.forEach(s=>row.push(s.has(f)?'✓':'✗'));
-  lines.push(row.join('\t'));
+ // Standard features (all cars have these — listed once)
+ if(common.length){
+  lines.push('');
+  lines.push(`=== STANDARD FEATURES (all ${sorted.length} cars have these — ${common.length} features) ===`);
+  lines.push(common.join(', '));
  }
 
  exportText=lines.join('\n');
