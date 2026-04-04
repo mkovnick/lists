@@ -335,8 +335,14 @@ https://www.autoscout24.com/offers/..."></textarea>
 
 <!-- ══ EXPORT FOR CLAUDE ══ -->
 <div id="matrix" class="pane">
-<p style="font-size:.85rem;color:var(--muted);margin-bottom:8px">Tap "Copy" then paste into your Claude project for analysis.</p>
-<button class="btn btn-primary" onclick="copyExport()" id="copy-btn">Copy to Clipboard</button>
+<div style="display:flex;gap:8px;align-items:end;margin-bottom:10px">
+ <div style="flex:1"><label>Filter by model</label>
+  <select id="model-filter" onchange="renderMatrix()" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.95rem">
+   <option value="">All models</option>
+  </select>
+ </div>
+ <button class="btn btn-primary" onclick="copyExport()" id="copy-btn" style="width:auto;padding:12px 20px;margin:0;flex-shrink:0">Copy</button>
+</div>
 <div class="stats" id="matrix-stats"></div>
 <pre class="log" id="matrix-out" style="max-height:none;white-space:pre;overflow-x:auto;font-size:.7rem;margin-top:10px"></pre>
 </div>
@@ -431,14 +437,41 @@ async function delCar(lid){
 // ═══ EXPORT FOR CLAUDE ═══
 let exportText='';
 
+function populateModelFilter(){
+ const sel=document.getElementById('model-filter');
+ const cur=sel.value;
+ const models=new Set();
+ cars.forEach(c=>{
+  const m=[c.make,c.model].filter(Boolean).join(' ');
+  if(m)models.add(m);
+ });
+ sel.innerHTML='<option value="">All models ('+cars.length+' cars)</option>';
+ [...models].sort().forEach(m=>{
+  const count=cars.filter(c=>[c.make,c.model].filter(Boolean).join(' ')===m).length;
+  sel.innerHTML+=`<option value="${esc(m)}">${esc(m)} (${count})</option>`;
+ });
+ if(cur)sel.value=cur;
+}
+
 function renderMatrix(){
  const out=document.getElementById('matrix-out');
  const statsEl=document.getElementById('matrix-stats');
+ const modelFilter=document.getElementById('model-filter').value;
 
- if(cars.length<1){out.textContent='No cars yet. Use Search or Add URL.';statsEl.innerHTML='';exportText='';return;}
+ populateModelFilter();
 
- // Sort cars by most features first
- const sorted=[...cars].sort((a,b)=>(b.features||[]).length-(a.features||[]).length);
+ if(cars.length<1){out.textContent='No cars yet. Scrape some listings first.';statsEl.innerHTML='';exportText='';return;}
+
+ // Filter by model
+ let filtered=cars;
+ if(modelFilter){
+  filtered=cars.filter(c=>[c.make,c.model].filter(Boolean).join(' ')===modelFilter);
+ }
+
+ if(!filtered.length){out.textContent='No cars match this filter.';statsEl.innerHTML='';exportText='';return;}
+
+ // Sort by most features first
+ const sorted=[...filtered].sort((a,b)=>(b.features||[]).length-(a.features||[]).length);
 
  // Collect all features
  const carFeats=sorted.map(c=>new Set(c.features||[]));
@@ -446,7 +479,10 @@ function renderMatrix(){
  carFeats.forEach(s=>s.forEach(f=>allFeats.add(f)));
  const feats=[...allFeats].sort();
 
- if(!feats.length){out.textContent='No feature data. Scrape listings first.';statsEl.innerHTML='';exportText='';return;}
+ if(!feats.length){out.textContent='No feature data. Scrape listings to get features.';statsEl.innerHTML='';exportText='';return;}
+
+ // Detect model for the prompt
+ const modelName=modelFilter||[...new Set(sorted.map(c=>[c.make,c.model].filter(Boolean).join(' ')))].join(' / ');
 
  // Stats
  statsEl.innerHTML=`
@@ -454,15 +490,14 @@ function renderMatrix(){
   <div class="stat"><div class="val">${feats.length}</div><div class="lbl">Features</div></div>
  `;
 
- // Build tab-separated export
- // Header: car summaries
+ // Build export text
  let lines=[];
- lines.push('=== AUTOSCOUT24 SEARCH RESULTS ===');
- lines.push('');
+
+ // ── Section 1: Car details ──
+ lines.push('=== AUTOSCOUT24 SCRAPED DATA ===');
+ lines.push(`Model: ${modelName}`);
  lines.push(`${sorted.length} cars scraped, ${feats.length} unique features found`);
  lines.push('');
-
- // Per-car summary block
  lines.push('=== CAR DETAILS ===');
  sorted.forEach((c,i)=>{
   const label=[c.make,c.model,c.version].filter(Boolean).join(' ')||c.title||'?';
@@ -479,24 +514,16 @@ function renderMatrix(){
   if(c.body_color) lines.push(`Color: ${str(c.body_color)}`);
   if(c.body_type) lines.push(`Body: ${str(c.body_type)}`);
   if(c.seller_name) lines.push(`Seller: ${str(c.seller_name)}, ${str(c.seller_city)} ${str(c.seller_country)}`);
-  const fc=(c.features||[]).length;
-  lines.push(`Features: ${fc}`);
+  lines.push(`Features: ${(c.features||[]).length}`);
  });
 
- // Feature comparison table (tab-separated)
+ // ── Section 2: Feature comparison table ──
  lines.push('');
  lines.push('=== FEATURE COMPARISON TABLE ===');
- lines.push('(✓ = has feature, ✗ = missing)');
+ lines.push('(✓ = has, ✗ = missing)');
  lines.push('');
-
- // Column headers (short labels)
- const shortLabels=sorted.map((c,i)=>{
-  let l=[c.make,c.model].filter(Boolean).join(' ')||'Car '+(i+1);
-  return `Car${i+1}: ${l}`;
- });
+ const shortLabels=sorted.map((c,i)=>`Car${i+1}`);
  lines.push('Feature\t'+shortLabels.join('\t'));
-
- // Feature rows
  for(const f of feats){
   const row=[f];
   carFeats.forEach(s=>row.push(s.has(f)?'✓':'✗'));
